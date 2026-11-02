@@ -134,7 +134,9 @@ The office and unit names are for Xplogent's campaign picker, which only staff s
 AI's call brief leaves them out unless `XPLOGENT_SHARE_CLIENT_NAME=true`.
 
 A vacancy is left out when it is closed, on hold, blacklisted (the sale, its office or its
-unit), has no coordinates, or has reached its CV limit.
+unit), has no coordinates, or has reached its CV limit (active CVs only). These are the same
+rules as `campaigns/queue`'s 409, so every listed vacancy can be queued. Search words match
+literally (`%` and `_` are not wildcards).
 
 ### `campaigns/queue`
 
@@ -160,16 +162,20 @@ The `skipped` reasons mean:
 | `blocked` | Marked do-not-call. |
 | `not_interested` | Marked not interested, generally or for this vacancy. |
 | `no_job` | Marked no job. |
-| `closed` | Applicant status is not active. |
+| `closed` | The applicant's record is closed (paid status `close`). |
 | `already_sent` | Their CV is already sent to this vacancy. |
 | `locked` | Someone is calling them now. |
 | `recently_called` | The AI called them within `exclude_called_within_days`. |
 | `no_phone` | No number Xplogent can dial. |
 
 Candidates are sorted by distance, then those never called first. No email, date of birth,
-CV file, full address or full postcode is sent.
+CV file, full address or full postcode is sent. `last_note` (the latest recruiter note) is
+redacted first: emails, phone numbers, postcodes and likely dates of birth are removed (the
+CV excerpt's rules; recent dates such as a callback date stay).
 
-A vacancy that can't be called (see `sales/open`) returns 409 `sale_not_callable`.
+A vacancy that can't be called (see `sales/open`) returns 409 `sale_not_callable`. Without
+the AI user (`XPLOGENT_AI_USER_ID`) the queue answers 503 `ai_user_missing`: "recently called"
+is read from the AI user's calls, so it can't be skipped silently.
 
 ### `contact-lookup`
 
@@ -187,8 +193,8 @@ the mobile, secondary and landline numbers are all searched. The response is:
   "interviews": [], "calls": [{"at": "...", "by": "Xplogent AI", "direction": "outbound", "duration_s": 60}]}}
 ```
 
-The lists are capped (5 calls, 5 history rows). An unknown number returns
-`404 {"ok": true, "found": false}`.
+The lists are capped (5 calls, 5 history rows). `notes` and `callback_note` are redacted like
+the queue's `last_note`. An unknown number returns `404 {"ok": true, "found": false}`.
 
 ### `call-summary`
 
@@ -227,17 +233,33 @@ through `ApplicantStatusService`, the same code as the recruiter's short notes:
 
 The note reads `AI call (<outcome>): <summary> …`, followed by the CRM's usual
 `--- By: Xplogent AI Date: …` suffix. If the candidate gave a new email address, the note
-says so, but the applicant's email is never overwritten. No CV note is ever created.
+says so, but the applicant's email is never overwritten. If the call queued a vacancy email
+(`send-job-details`), the note says where it went. No CV note is ever created.
+
+The summary also ends the AI's dial lock on that number, as insurance on top of Xplogent's
+own `dial-unlock`: only a lock taken no later than the call's `started_at` (plus a minute),
+never a newer call's and never a recruiter's. The reply is
+`{"ok": true, "call_log_id": 12, "lock_released": true|false}`.
 
 ### `send-job-details`
 
 Request: `{"applicant_id": 1, "sale_id": 45, "email": "sarah@example.org", "call_id": 9}`.
 
 The CRM queues the `send_job_vacancy_details` template, filled the same way as **Send email to
-applicants** (`VacancyEmailService`), as a `sent_emails` row with status `0`. The
-`emails:send-bulk` cron sends it. Requests are refused in these cases:
+applicants** (`VacancyEmailService`), as a `sent_emails` row with status `0` and the call's id in
+`xplogent_call_id`. The `emails:send-bulk` cron sends it. The template's placeholders are the
+sale's own unit (`(unit_name)`), full or part time (`(job_type)`) and the postcode district
+(`(location)`).
+
+The same `call_id`, applicant and vacancy again returns `{"ok": true, "duplicate": true,
+"sent_email_id": 7}` and queues nothing (also when two arrive at once). The address may be one
+the candidate just gave on the call; it is recorded on the email and in the call's note.
+
+Requests are refused in these cases:
 
 - a blocked applicant → 409 `blocked`;
+- a vacancy that can't be called (closed, on hold, blacklisted, full; see `sales/open`) → 409
+  `sale_not_callable`;
 - an invalid address → 422;
 - more than 3 to the same applicant in a day → 429;
 - a missing or inactive template → 503 `template_missing`.
@@ -245,7 +267,9 @@ applicants** (`VacancyEmailService`), as a `sent_emails` row with status `0`. Th
 ### `dial-lock` and `dial-unlock`
 
 Lock request: `{"phone": "+447700900123", "applicant_id": 1, "ttl_seconds": 900,
-"lock_token": "<8–64 chars, random per call>"}`.
+"lock_token": "<8–64 chars, random per call>"}`. `ttl_seconds` is 60–7,200 (more gets 422); the
+reply says the TTL applied: `{"ok": true, "locked": true, "expires_at": "…", "ttl_seconds": 900,
+"renewed": false}`.
 
 This is the same `dial_locks` row recruiters' click-to-dial uses, owned by the AI user:
 
@@ -254,10 +278,20 @@ This is the same `dial_locks` row recruiters' click-to-dial uses, owned by the A
 - the same token renews the lock (`"renewed": true`, the call count doesn't go up);
 - a different token gets 409.
 
-`dial-unlock` releases the lock only for the same token, and returns `{"released": true|false}`.
+`dial-unlock` (`{"phone", "lock_token"}`, both required) releases the lock only for the same
+token:
+
+| Reply | Meaning |
+|---|---|
+| 200 `{"released": true}` | Released. |
+| 200 `{"released": false}` | There was no lock left (it expired, or the call summary already ended it). Releasing twice is harmless. |
+| 409 `not_your_lock` with `locked_by` | Someone else's lock is active on that number; nothing changed. |
+| 503 `ai_user_missing` | `XPLOGENT_AI_USER_ID` isn't set. |
 
 When Settings → Dialing has the lock switched off, the lock route answers
-`{"locked": true, "locking": "off"}` and stores nothing.
+`{"ok": true, "locked": true, "locking": "off", "expires_at": null}` and stores nothing.
+`locked: true` here means "go ahead": the dial lock is off for everyone, recruiters included,
+so there is nothing to hold or release.
 
 ## Agent call page
 
@@ -267,7 +301,11 @@ When Settings → Dialing has the lock switched off, the lock route answers
 2. see the same candidate list as `campaigns/queue`, with numbers masked;
 3. press **Call** on a candidate.
 
-The CRM checks that the candidate isn't blocked or locked, then sends a signed
+The CRM checks the candidate against the queue's exclusions for that vacancy (blocked, not
+interested generally or in this vacancy, no job, closed, CV already sent for it, inactive, or
+any of their numbers locked) and refuses with the reason. "Recently called" is left to staff:
+the list shows **Last called**, and a retry after a voicemail is normal. It also needs the AI
+user (503 with the set-up steps), because the result is saved as that user. It then sends a signed
 `POST {XPLOGENT_BASE_URL}/voip/crm/dial` with
 `{phone, applicant_id, sale_id, requested_by, brief: {sale, candidate}}`. The token stays on
 the server. Xplogent applies all its own rules: do-not-call list, calling hours, cost caps

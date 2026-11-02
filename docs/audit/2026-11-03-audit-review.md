@@ -156,3 +156,43 @@ gets re-checked as it is fixed.
 4. Still open from before:
    - make the repo private;
    - rotate the FreePBX and admin passwords in the git history.
+
+## 6. Progress
+
+### Batch 1: done (commits `9017b46` to `e1d0532`)
+N-01, N-02, N-03, N-05, N-06, R-01, R-02, R-07 to R-11, M-01, S-01, S-02, S-07, B-01, B-09/L-02,
+X-01. Tested on MariaDB and MySQL 8, both locally and in CI.
+
+### Batch 2: done (the Xplogent link)
+| Finding | Commit | What changed |
+|---|---|---|
+| X-02 | `ad9a6a6` | Every success reply carries `ok: true`. |
+| X-03, X-26(a) | `8435f40` | `sales/open` applies the queue's callable rules (office/unit blacklist, coordinates, CV limit); search words match literally. |
+| X-04 | `62b17bf` | Notes sent to Xplogent are redacted (HTML decoded first; recent dates such as a callback date stay). |
+| X-05 | `54d02a6` | `campaigns/queue` and **Call with AI** need the AI user (503). The page still lists recently-called candidates (by design). |
+| X-08 | `7e6e41b` | `send-job-details` refuses a non-callable vacancy and sends once per call (`sent_emails.xplogent_call_id`, unique); the call's note says where the email went. |
+| X-09, X-21 | `cb3b4ef` | The vacancy email names the sale's own unit and fills `(location)` with the postcode district (recruiter screen too). |
+| X-10 | `60516c9` | **Call with AI** applies the queue's exclusions (one shared rule, `Directory::reasonFor`). |
+| X-07 | `d081647` | A call summary ends that call's AI dial lock (never a newer call's or a recruiter's). |
+| X-19 | `5677355` | A migration guarantees the `call_id` unique index (it stops, rather than deleting rows, if duplicates exist). |
+| X-22, X-23, X-24 | `f947405` | The lock TTL is applied as asked, up to 7,200 s, and reported. `dial-unlock` answers 409 / 503 / an idempotent 200. The locking-off reply is documented. |
+| X-26(e) | `c11b13f` | One "not interested in this sale" row per applicant and sale; revert clears old duplicates (recruiter screens too). |
+
+**Where the fix differs from muse's suggestion, and why**
+- **X-21:** muse suggested filling `(job_type)` from `sales.job_type`. On the sale form that column
+  is the internal class `specialist`/`regular`, while `position_type` is `full time`/`part time`.
+  The CRM's original code deliberately fills `(job_type)` with `position_type`, so that stays; only
+  `(location)` changed.
+- **X-22:** muse suggested validating `max:3600`. A 422 would stop a campaign if a lock ever
+  asked for more, so the CRM now accepts and applies up to 7,200 s. Xplogent asks for at most
+  2,100 s today.
+- **X-24:** muse suggested replying `locked: false` when the lock is switched off. Xplogent dials
+  only on `locked: true`, so every manual call would warn and every campaign would stop. The reply
+  is kept and documented: it means "go ahead, nothing stored".
+- **X-08:** the recipient isn't required to be a stored address (the candidate may have just given
+  a new one); it is recorded on the email and in the call's note instead.
+
+**Still open:**
+- X-17 (owner question 2);
+- X-06 and X-11 (features, P2);
+- the other P2s in the backlog.
