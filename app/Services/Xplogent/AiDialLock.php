@@ -19,6 +19,9 @@ use Illuminate\Support\Facades\DB;
  */
 class AiDialLock
 {
+    /** The longest lock the AI may take (the controller refuses more; the reply says what was applied). */
+    public const MAX_TTL = 7200;
+
     /** @return array{status: int, body: array} */
     public function lock(string $phone, ?int $applicantId, int $ttlSeconds, string $token, User $ai): array
     {
@@ -29,7 +32,7 @@ class AiDialLock
         if (!$this->lockingEnabled()) {
             return ['status' => 200, 'body' => ['ok' => true, 'locked' => true, 'expires_at' => null, 'locking' => 'off']];
         }
-        $ttlSeconds = max(60, min(3600, $ttlSeconds));
+        $ttlSeconds = max(60, min(self::MAX_TTL, $ttlSeconds));
         $applicantId ??= Applicant::whereNull('deleted_at')->phoneMatches($phone)->value('id');
 
         return DB::transaction(function () use ($key, $phone, $applicantId, $ttlSeconds, $token, $ai) {
@@ -65,21 +68,31 @@ class AiDialLock
             }
 
             return ['status' => 200, 'body' => ['ok' => true, 'locked' => true,
-                'expires_at' => $until->toIso8601ZuluString(), 'renewed' => $sameLease]];
+                'expires_at' => $until->toIso8601ZuluString(), 'ttl_seconds' => $ttlSeconds, 'renewed' => $sameLease]];
         });
     }
 
-    /** Release the AI's own lock for this number, only with the same token. */
-    public function unlock(string $phone, string $token, User $ai): bool
+    /**
+     * Release the AI's own lock for this number, only with the same token.
+     *
+     * @return array{released: bool, locked_by: ?string} locked_by: who holds an active lock on
+     *         this number that this token doesn't own (null: there is no lock left to release)
+     */
+    public function unlock(string $phone, string $token, User $ai): array
     {
         $key = DialLock::keyFor($phone);
-        if ($key === null || $token === '') {
-            return false;
+        if ($key === null) {
+            return ['released' => false, 'locked_by' => null];
         }
-
-        return DialLock::where('phone_key', $key)->where('user_id', $ai->id)->where('lock_token', $token)
-            ->where('expires_at', '>', now())
+        $released = $token !== '' && DialLock::where('phone_key', $key)->where('user_id', $ai->id)
+            ->where('lock_token', $token)->where('expires_at', '>', now())
             ->update(['expires_at' => now(), 'lock_token' => null]) > 0;
+        if ($released) {
+            return ['released' => true, 'locked_by' => null];
+        }
+        $row = DialLock::where('phone_key', $key)->where('expires_at', '>', now())->first();
+
+        return ['released' => false, 'locked_by' => $row ? ($row->user_name ?: 'another agent') : null];
     }
 
     /**

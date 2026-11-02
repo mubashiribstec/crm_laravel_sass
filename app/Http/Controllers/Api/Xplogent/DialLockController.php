@@ -20,7 +20,7 @@ class DialLockController extends Controller
         $v = $request->validate([
             'phone' => 'required|string|max:40',
             'applicant_id' => 'nullable|integer',
-            'ttl_seconds' => 'nullable|integer|min:1|max:86400',
+            'ttl_seconds' => 'nullable|integer|min:1|max:' . AiDialLock::MAX_TTL,
             'lock_token' => 'required|string|min:8|max:64',
         ]);
         $ai = Xplogent::aiUser();
@@ -33,12 +33,24 @@ class DialLockController extends Controller
         return Xplogent::ok($r['body'], $r['status']);
     }
 
+    /**
+     * 200 released: true; 200 released: false when there is no lock left (it expired, or the
+     * call summary already ended it), so releasing twice is harmless; 409 not_your_lock when
+     * someone else's lock is active; 503 without the AI user.
+     */
     public function unlock(Request $request): JsonResponse
     {
-        $v = $request->validate(['phone' => 'required|string|max:40', 'lock_token' => 'nullable|string|max:64']);
+        $v = $request->validate(['phone' => 'required|string|max:40', 'lock_token' => 'required|string|max:64']);
         $ai = Xplogent::aiUser();
-        $released = $ai ? $this->locks->unlock($v['phone'], (string) ($v['lock_token'] ?? ''), $ai) : false;
+        if (!$ai) {
+            return Xplogent::error(503, 'ai_user_missing', 'XPLOGENT_AI_USER_ID is not set');
+        }
+        $r = $this->locks->unlock($v['phone'], $v['lock_token'], $ai);
+        if (!$r['released'] && $r['locked_by'] !== null) {
+            return Xplogent::error(409, 'not_your_lock', "this number's lock belongs to someone else",
+                ['released' => false, 'locked_by' => $r['locked_by']]);
+        }
 
-        return Xplogent::ok(['ok' => true, 'released' => $released]);
+        return Xplogent::ok(['released' => $r['released']]);
     }
 }
