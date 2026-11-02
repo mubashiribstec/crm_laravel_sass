@@ -55,8 +55,11 @@ class VacancyEmailService
         ];
     }
 
-    /** Queue the filled email for one recipient, exactly like SendEmails::saveEmailDB. */
-    public function queue(array $filled, string $to, int $applicantId, int $saleId, User $by): SentEmail
+    /**
+     * Queue the filled email for one recipient, exactly like SendEmails::saveEmailDB.
+     * $callId: the Xplogent call that asked for it (send-job-details), so a repeat is a no-op.
+     */
+    public function queue(array $filled, string $to, int $applicantId, int $saleId, User $by, ?int $callId = null): SentEmail
     {
         $sent = new SentEmail();
         $sent->action_name = strtolower(str_replace(' ', '_', $filled['title']));
@@ -69,8 +72,32 @@ class VacancyEmailService
         $sent->applicant_id = $applicantId;
         $sent->sale_id = $saleId;
         $sent->user_id = $by->id;
+        if ($callId !== null && self::tracksCalls()) {
+            $sent->xplogent_call_id = $callId;
+        }
         $sent->save();
 
         return $sent;
+    }
+
+    /** The vacancy emails an Xplogent call queued (optionally for one candidate and vacancy). */
+    public function sentForCall(int $callId, ?int $applicantId = null, ?int $saleId = null): \Illuminate\Support\Collection
+    {
+        if (!self::tracksCalls()) {
+            return collect();
+        }
+
+        return SentEmail::where('xplogent_call_id', $callId)
+            ->when($applicantId !== null, fn ($q) => $q->where('applicant_id', $applicantId))
+            ->when($saleId !== null, fn ($q) => $q->where('sale_id', $saleId))
+            ->orderBy('id')->get();
+    }
+
+    /** Whether sent_emails has xplogent_call_id yet (its migration may not have run). */
+    public static function tracksCalls(): bool
+    {
+        static $has = null;
+
+        return $has ??= \Illuminate\Support\Facades\Schema::hasColumn('sent_emails', 'xplogent_call_id');
     }
 }

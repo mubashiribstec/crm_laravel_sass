@@ -36,6 +36,7 @@ class CallSummaryWriter
         private ApplicantStatusService $status,
         private SaleInterestService $interest,
         private Directory $directory,
+        private VacancyEmailService $emails,
     ) {
     }
 
@@ -137,6 +138,12 @@ class CallSummaryWriter
         $known = array_map('strtolower', array_filter([$applicant->applicant_email, $applicant->applicant_email_secondary]));
         if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) && !in_array($email, $known, true)) {
             $parts[] = "Candidate gave email {$email}.";
+        }
+        // Where this call's vacancy email went (send-job-details), so staff can see it in the note.
+        $emailed = $this->emails->sentForCall((int) ($p['call_id'] ?? 0), $applicant->id)
+            ->pluck('sent_to')->map(fn ($to) => strtolower(trim((string) $to)))->filter()->unique();
+        if ($emailed->isNotEmpty()) {
+            $parts[] = 'Vacancy details emailed to ' . $emailed->implode(', ') . '.';
         }
 
         // The transcript is never written into notes: it stays in xplogent_call_events.

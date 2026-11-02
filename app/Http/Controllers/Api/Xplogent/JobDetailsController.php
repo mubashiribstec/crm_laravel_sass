@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api\Xplogent;
 
 use App\Http\Controllers\Controller;
+use App\Services\Xplogent\Directory;
 use App\Services\Xplogent\VacancyEmailService;
 use App\Support\Xplogent;
 use Horsefly\Applicant;
 use Horsefly\Sale;
 use Horsefly\SentEmail;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -16,7 +18,7 @@ class JobDetailsController extends Controller
 {
     public const PER_DAY = 3;
 
-    public function __construct(private VacancyEmailService $emails)
+    public function __construct(private VacancyEmailService $emails, private Directory $directory)
     {
     }
 
@@ -40,6 +42,13 @@ class JobDetailsController extends Controller
         if ($applicant->is_blocked) {
             return Xplogent::error(409, 'blocked', 'this applicant is blocked');
         }
+        if ($why = $this->directory->notCallable($sale)) {          // closed, on hold, blacklisted, full…
+            return Xplogent::error(409, 'sale_not_callable', $why);
+        }
+        $callId = isset($v['call_id']) ? (int) $v['call_id'] : null;
+        if ($callId !== null && ($already = $this->emails->sentForCall($callId, $applicant->id, $sale->id)->first())) {
+            return Xplogent::ok(['duplicate' => true, 'sent_email_id' => $already->id]);   // queued once per call
+        }
         $today = SentEmail::where('applicant_id', $applicant->id)->where('user_id', $ai->id)
             ->where('created_at', '>=', now()->startOfDay())->count();
         if ($today >= self::PER_DAY) {
@@ -49,8 +58,16 @@ class JobDetailsController extends Controller
         if (!$filled) {
             return Xplogent::error(503, 'template_missing', 'the send_job_vacancy_details email template is missing or inactive');
         }
-        $sent = $this->emails->queue($filled, $v['email'], $applicant->id, $sale->id, $ai);
+        try {
+            $sent = $this->emails->queue($filled, $v['email'], $applicant->id, $sale->id, $ai, $callId);
+        } catch (QueryException $e) {
+            // The same call's request twice at once: the unique index lets one through.
+            if ($callId !== null && ($already = $this->emails->sentForCall($callId, $applicant->id, $sale->id)->first())) {
+                return Xplogent::ok(['duplicate' => true, 'sent_email_id' => $already->id]);
+            }
+            throw $e;
+        }
 
-        return Xplogent::ok(['ok' => true, 'sent_email_id' => $sent->id]);
+        return Xplogent::ok(['sent_email_id' => $sent->id]);
     }
 }
