@@ -57,6 +57,23 @@ services:
     networks:
       - laravel
 
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: laravel-phpmyadmin
+    restart: unless-stopped
+    environment:
+      # Talks to the mysql container by name over the laravel network.
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      # Lets phpMyAdmin import larger SQL files.
+      UPLOAD_LIMIT: 300M
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql
+    networks:
+      - laravel
+
 volumes:
   mysql_data:
 
