@@ -2,7 +2,7 @@
 FROM php:8.2-fpm
 
 # 2. Set working directory
-WORKDIR /var/www
+WORKDIR /var/www/crm
 
 # 3. Install system packages and PHP extensions
 RUN apt-get update && apt-get install -y \
@@ -29,8 +29,8 @@ RUN composer install --no-interaction --prefer-dist --optimize-autoloader
 RUN npm install && npm run build
 
 # 9. Set permissions
-RUN chown -R www-data:www-data /var/www \
-    && chmod -R 775 /var/www/storage /var/www/bootstrap/cache
+RUN chown -R www-data:www-data /var/www/crm \
+    && chmod -R 775 /var/www/crm/storage /var/www/crm/bootstrap/cache
 
 # 10. Expose PHP-FPM port
 EXPOSE 9000
