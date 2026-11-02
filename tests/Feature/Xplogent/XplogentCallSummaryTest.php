@@ -76,6 +76,20 @@ class XplogentCallSummaryTest extends XplogentTestCase
         $this->assertTrue((bool) $b->fresh()->is_temp_not_interested);
     }
 
+    /** X-26(e): a second "not interested" for the same sale reuses its row; "interested" clears all of them. */
+    public function test_not_interested_twice_keeps_one_row_and_interested_clears_old_duplicates(): void
+    {
+        $a = $this->applicant(['applicant_phone' => '07700900123']);
+        $sale = $this->sale();
+        $this->summary($a, 'not_interested', ['sale_id' => $sale->id])->assertOk();
+        $this->summary($a, 'not_interested', ['sale_id' => $sale->id])->assertOk();
+        $this->assertSame(1, ApplicantPivotSale::where(['applicant_id' => $a->id, 'sale_id' => $sale->id])->count());
+
+        ApplicantPivotSale::create(['applicant_id' => $a->id, 'sale_id' => $sale->id]);     // a duplicate from older code
+        $this->summary($a, 'interested', ['sale_id' => $sale->id])->assertOk();
+        $this->assertSame(0, ApplicantPivotSale::where(['applicant_id' => $a->id, 'sale_id' => $sale->id])->count());
+    }
+
     public function test_interested_reverts_a_not_interested_and_never_creates_cv_notes(): void
     {
         $sale = $this->sale();

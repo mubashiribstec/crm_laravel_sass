@@ -27,11 +27,14 @@ class SaleInterestService
     {
         $notes = $details . ' --- By: ' . $by->name . ' Date: ' . now()->format('d-m-Y');
 
-        $pivotSale = ApplicantPivotSale::create([
+        // One row per applicant and sale: a second "not interested" adds its reason to the same row.
+        $pivotSale = ApplicantPivotSale::firstOrCreate([
             'applicant_id' => $applicantId,
             'sale_id' => $saleId,
         ]);
-        $pivotSale->update(['pivot_uid' => md5($pivotSale->id)]);
+        if ($pivotSale->wasRecentlyCreated) {
+            $pivotSale->update(['pivot_uid' => md5($pivotSale->id)]);
+        }
 
         $notesForRange = NotesForRangeApplicant::create([
             'applicants_pivot_sales_id' => $pivotSale->id,
@@ -53,8 +56,9 @@ class SaleInterestService
     {
         $notes = self::INTERESTED_NOTE . ' --- By: ' . $by->name . ' Date: ' . now()->format('d-m-Y');
 
-        $pivotSale = ApplicantPivotSale::where(['applicant_id' => $applicantId, 'sale_id' => $saleId])->first();
-        if ($pivotSale) {
+        // Every row for this applicant and sale (older code could store the same one twice).
+        $pivotSales = ApplicantPivotSale::where(['applicant_id' => $applicantId, 'sale_id' => $saleId])->get();
+        foreach ($pivotSales as $pivotSale) {
             $pivotSale->update(['is_interested' => true]);
             NotesForRangeApplicant::where('applicants_pivot_sales_id', $pivotSale->id)->delete();
             $pivotSale->delete();
@@ -66,7 +70,7 @@ class SaleInterestService
 
         $this->newModuleNote($applicantId, $notes, $by);
 
-        return (bool) $pivotSale;
+        return $pivotSales->isNotEmpty();
     }
 
     public function isNotInterestedIn(int $applicantId, int $saleId): bool
