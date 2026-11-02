@@ -4053,24 +4053,30 @@ class SaleController extends Controller
             END AS paid_status_order
         ", [$sale_id, $sale_id]);
 
-        // Sorting logic
+        // Sorting logic. The direction went raw into orderByRaw (SQL injection) and any
+        // column name reached orderBy (most of the table's columns aren't real query columns,
+        // so sorting them failed). Both are allowlisted now.
         if ($request->has('order')) {
-            $orderColumn    = $request->input('columns.' . $request->input('order.0.column') . '.data');
-            $orderDirection = $request->input('order.0.dir', 'desc');
+            $orderColumn    = (string) $request->input('columns.' . $request->input('order.0.column') . '.data');
+            $orderDirection = strtolower((string) $request->input('order.0.dir')) === 'asc' ? 'asc' : 'desc';
+            $sortable = [
+                'job_source' => 'applicants.job_source_id',
+                'job_category' => 'applicants.job_category_id',
+                'job_title' => 'applicants.job_title_id',
+                'applicant_name' => 'applicants.applicant_name',
+                'applicant_email' => 'applicants.applicant_email',
+                'applicant_postcode' => 'applicants.applicant_postcode',
+                'applicant_experience' => 'applicants.applicant_experience',
+                'paid_status' => 'paid_status_order',
+                'created_at' => 'applicants.created_at',
+                'updated_at' => 'applicants.updated_at',
+            ];
 
-            if ($orderColumn === 'job_source') {
-                $model->orderBy('job_source_id', $orderDirection);
-            } elseif ($orderColumn === 'job_category') {
-                $model->orderBy('job_category_id', $orderDirection);
-            } elseif ($orderColumn === 'job_title') {
-                $model->orderBy('job_title_id', $orderDirection);
-            } elseif ($orderColumn === 'notes_created_at') {
-                // ✅ Must use orderByRaw for computed/aliased columns
-                $model->orderByRaw("notes_created_at {$orderDirection}");
-            } elseif ($orderColumn && !in_array($orderColumn, ['DT_RowIndex', 'checkbox'])) {
-                $model->orderBy($orderColumn, $orderDirection);
+            if ($orderColumn === 'notes_created_at') {
+                $model->orderByRaw('notes_created_at ' . $orderDirection);       // computed column
+            } elseif (isset($sortable[$orderColumn])) {
+                $model->orderBy($sortable[$orderColumn], $orderDirection);
             } else {
-                // ✅ Fallback default
                 $model->orderByRaw('notes_created_at DESC');
             }
         } else {
