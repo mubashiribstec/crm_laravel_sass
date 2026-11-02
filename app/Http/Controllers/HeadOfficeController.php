@@ -134,13 +134,13 @@ class HeadOfficeController extends Controller
             $postcode = preg_replace('/\s+/', '', $request->office_postcode);
             // 1. Try to find a match in the full postcodes table first
             $postcode_query = DB::table('postcodes')
-                ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [$postcode])
+                ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [strtolower($postcode)])
                 ->first();
 
             // 2. Fallback: If not found in full postcodes, check outcodes
             if (!$postcode_query) {
                 $postcode_query = DB::table('outcodepostcodes')
-                    ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [$postcode])
+                    ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [strtolower($postcode)])
                     ->first();
             }
 
@@ -799,13 +799,13 @@ class HeadOfficeController extends Controller
             if ($postcode != preg_replace('/\s+/', '', $office->office_postcode)) {
                 // 1. Try to find a match in the full postcodes table first
                 $postcode_query = DB::table('postcodes')
-                    ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [$postcode])
+                    ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [strtolower($postcode)])
                     ->first();
 
                 // 2. Fallback: If not found in full postcodes, check outcodes
                 if (!$postcode_query) {
                     $postcode_query = DB::table('outcodepostcodes')
-                        ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [$postcode])
+                        ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [strtolower($postcode)])
                         ->first();
                 }
 

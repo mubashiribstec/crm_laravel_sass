@@ -641,15 +641,15 @@ class SaleController extends Controller
     {
         // Validation
         $validator = Validator::make($request->all(), [
-            'office_id' => 'required',
-            'unit_id' => 'required',
+            'office_id' => 'required|integer|exists:offices,id',
+            'unit_id' => 'required|integer|exists:units,id',
             'sale_postcode' => 'required|string',
-            'job_category_id' => 'required',
-            'job_title_id' => 'required',
-            'job_source_id' => 'required',
-            'job_type' => 'required',
-            'position_type' => 'required',
-            'cv_limit' => 'required',
+            'job_category_id' => 'required|integer|exists:job_categories,id',
+            'job_title_id' => 'required|integer|exists:job_titles,id',
+            'job_source_id' => 'required|integer|exists:job_sources,id',
+            'job_type' => 'required|string|max:50',
+            'position_type' => 'required|string|max:50',
+            'cv_limit' => 'required|integer|min:1|max:127',     // tinyInteger; 0 would block Send CV everywhere
             'timing' => 'required',
             'experience' => 'required',
             'salary' => 'required',
@@ -744,13 +744,13 @@ class SaleController extends Controller
             $postcode = preg_replace('/\s+/', '', $request->sale_postcode);
             // 1. Try to find a match in the full postcodes table first
             $postcode_query = DB::table('postcodes')
-                ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [$postcode])
+                ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [strtolower($postcode)])
                 ->first();
 
             // 2. Fallback: If not found in full postcodes, check outcodes
             if (!$postcode_query) {
                 $postcode_query = DB::table('outcodepostcodes')
-                    ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [$postcode])
+                    ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [strtolower($postcode)])
                     ->first();
             }
 
@@ -919,15 +919,15 @@ class SaleController extends Controller
         // Validation
         $validator = Validator::make($request->all(), [
             'sale_id' => 'required|exists:sales,id',
-            'office_id' => 'required',
-            'unit_id' => 'required',
+            'office_id' => 'required|integer|exists:offices,id',
+            'unit_id' => 'required|integer|exists:units,id',
             'sale_postcode' => 'required|string',
-            'job_category_id' => 'required',
-            'job_title_id' => 'required',
-            'job_source_id' => 'required',
-            'job_type' => 'required',
-            'position_type' => 'required',
-            'cv_limit' => 'required',
+            'job_category_id' => 'required|integer|exists:job_categories,id',
+            'job_title_id' => 'required|integer|exists:job_titles,id',
+            'job_source_id' => 'required|integer|exists:job_sources,id',
+            'job_type' => 'required|string|max:50',
+            'position_type' => 'required|string|max:50',
+            'cv_limit' => 'required|integer|min:1|max:127',     // tinyInteger; 0 would block Send CV everywhere
             'timing' => 'required',
             'experience' => 'required',
             'salary' => 'required',
@@ -1048,13 +1048,13 @@ class SaleController extends Controller
             if ($postcode != preg_replace('/\s+/', '', $sale->sale_postcode)) {
                 // 1. Try to find a match in the full postcodes table first
                 $postcode_query = DB::table('postcodes')
-                    ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [$postcode])
+                    ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [strtolower($postcode)])
                     ->first();
 
                 // 2. Fallback: If not found in full postcodes, check outcodes
                 if (!$postcode_query) {
                     $postcode_query = DB::table('outcodepostcodes')
-                        ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [$postcode])
+                        ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [strtolower($postcode)])
                         ->first();
                 }
 

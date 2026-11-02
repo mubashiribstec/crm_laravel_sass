@@ -4,7 +4,12 @@ namespace Tests\Feature\Audit;
 
 use Horsefly\CrmNote;
 use Horsefly\CVNote;
+use Horsefly\JobSource;
 use Horsefly\JobTitle;
+use Horsefly\Office;
+use Horsefly\Sale;
+use Horsefly\Unit;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\Feature\Xplogent\XplogentTestCase;
 
@@ -60,5 +65,40 @@ class Batch3Test extends XplogentTestCase
             ->assertOk()->assertJson(['success' => false]);
         $this->assertFalse((bool) $a->fresh()->is_no_job);          // the "no job" write was undone (B-04)
         $this->assertSame(0, \Illuminate\Support\Facades\DB::transactionLevel() - 1);   // nothing left open
+    }
+
+    // ── B-05 / L-05: creating a sale ─────────────────────────────────────────
+    private function salePayload(array $overrides = []): array
+    {
+        $office = Office::factory()->create(['office_name' => 'Birch Care']);
+        $unit = Unit::factory()->create(['office_id' => $office->id, 'unit_name' => 'Birch House']);
+
+        return array_merge(['office_id' => $office->id, 'unit_id' => $unit->id, 'sale_postcode' => 'LS6 2AB',
+            'job_category_id' => $this->category->id, 'job_title_id' => $this->title->id,
+            'job_source_id' => JobSource::factory()->create()->id, 'job_type' => 'regular',
+            'position_type' => 'full time', 'cv_limit' => 8, 'timing' => 'Days', 'experience' => '1 year',
+            'salary' => '£12.60', 'benefits' => 'Pension', 'qualification' => 'NVQ 2', 'sale_notes' => 'New vacancy'],
+            $overrides);
+    }
+
+    public function test_a_known_uppercase_postcode_is_found_without_a_geocoding_call(): void
+    {
+        DB::table('postcodes')->insert(['postcode' => 'LS6 2AB', 'lat' => 53.8211, 'lng' => -1.5794]);
+        // No Google key is configured here, so before the fix (no match) this failed with "Geolocation failed".
+        $this->actingAs($this->staff('Jane Recruiter', 'sale-create'))->postJson('/sales/store', $this->salePayload())
+            ->assertOk()->assertJson(['success' => true]);
+        $sale = Sale::latest('id')->first();
+        $this->assertEqualsWithDelta(53.8211, (float) $sale->lat, 0.001);
+    }
+
+    public function test_a_sale_needs_a_whole_positive_cv_limit_and_real_ids(): void
+    {
+        $staff = $this->staff('Jane Recruiter', 'sale-create');
+        foreach ([['cv_limit' => 0], ['cv_limit' => 'abc'], ['cv_limit' => 500]] as $bad) {
+            $this->actingAs($staff)->postJson('/sales/store', $this->salePayload($bad))
+                ->assertStatus(422)->assertJsonPath('errors.cv_limit.0', fn ($m) => is_string($m));
+        }
+        $this->actingAs($staff)->postJson('/sales/store', $this->salePayload(['job_title_id' => 999999]))
+            ->assertStatus(422)->assertJsonStructure(['errors' => ['job_title_id']]);
     }
 }
