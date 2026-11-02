@@ -1719,39 +1719,29 @@ class ApplicantController extends Controller
     }
     public function changeStatus(Request $request)
     {
+        $v = $request->validate([
+            'applicant_id' => 'required|integer|exists:applicants,id',
+            'status' => 'required|in:0,1',               // inactive, active
+            'details' => 'required|string|max:5000',
+        ]);
         $user = Auth::user();
+        $applicantId = (int) $v['applicant_id'];
+        $notes = $v['details'] . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
 
-        $applicant_id = $request->input('applicant_id');
-        $status = $request->input('status');
-        $details = $request->input('details');
-        $notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
+        // One transaction: the old note is only switched off if the status and new note are saved.
+        DB::transaction(function () use ($applicantId, $notes, $user, $v) {
+            Applicant::where('id', $applicantId)->update(['applicant_notes' => $notes, 'status' => (int) $v['status']]);
 
-        $updateData = [
-            'applicant_notes' => $notes,
-            'status' => $status,
-        ];
-
-        Applicant::where('id', $applicant_id)->update($updateData);
-
-        // Disable previous module note
-        ModuleNote::where([
-            'module_noteable_id' => $applicant_id,
-            'module_noteable_type' => 'Horsefly\Applicant'
-        ])
-            ->orderBy('id', 'desc')
-            ->update(['status' => 0]);
-
-        // Create new module note
-        $moduleNote = ModuleNote::create([
-            'details' => $notes,
-            'module_noteable_id' => $applicant_id,
-            'module_noteable_type' => 'Horsefly\Applicant',
-            'user_id' => $user->id
-        ]);
-
-        $moduleNote->update([
-            'module_note_uid' => md5($moduleNote->id)
-        ]);
+            ModuleNote::where(['module_noteable_id' => $applicantId, 'module_noteable_type' => 'Horsefly\Applicant'])
+                ->update(['status' => 0]);
+            $moduleNote = ModuleNote::create([
+                'details' => $notes,
+                'module_noteable_id' => $applicantId,
+                'module_noteable_type' => 'Horsefly\Applicant',
+                'user_id' => $user->id,
+            ]);
+            $moduleNote->update(['module_note_uid' => md5($moduleNote->id)]);
+        });
 
         return redirect()->to(url()->previous());
     }

@@ -8,6 +8,7 @@ use Horsefly\JobSource;
 use Horsefly\JobTitle;
 use Horsefly\Office;
 use Horsefly\Sale;
+use Horsefly\SaleNote;
 use Horsefly\Unit;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -100,5 +101,53 @@ class Batch3Test extends XplogentTestCase
         }
         $this->actingAs($staff)->postJson('/sales/store', $this->salePayload(['job_title_id' => 999999]))
             ->assertStatus(422)->assertJsonStructure(['errors' => ['job_title_id']]);
+    }
+
+    // ── B-06 / L-04 / B-07: sale and applicant status writes ─────────────────
+    public function test_sale_notes_and_status_changes_are_validated_and_recorded_together(): void
+    {
+        $sale = $this->sale();
+        $noter = $this->staff('Jane Recruiter', 'sale-add-note');
+        $this->actingAs($noter)->postJson('/storeSaleNotes', ['sale_id' => 999999, 'details' => 'x'])->assertStatus(422);
+        $this->actingAs($noter)->postJson('/storeSaleNotes', ['sale_id' => $sale->id, 'details' => ''])->assertStatus(422);
+        SaleNote::create(['sale_id' => $sale->id, 'sale_note' => 'old', 'user_id' => $this->ai->id, 'status' => 1]);
+        $this->actingAs($noter)->post('/storeSaleNotes', ['sale_id' => $sale->id, 'details' => 'Client wants nights'])
+            ->assertRedirect();
+        $this->assertSame(1, SaleNote::where('sale_id', $sale->id)->where('status', 1)->count());
+        $this->assertStringStartsWith('Client wants nights', $sale->fresh()->sale_notes);
+
+        // changeSaleStatus: needs a change-status permission now, and a known status
+        $this->actingAs($noter)->postJson('/changeSaleStatus', ['sale_id' => $sale->id, 'status' => 0, 'details' => 'x'])
+            ->assertForbidden();
+        $manager = $this->staff('Sam Manager', 'sale-change-status', 'sale-mark-on-hold', 'sale-edit');
+        $this->actingAs($manager)->postJson('/changeSaleStatus', ['sale_id' => $sale->id, 'status' => 'open', 'details' => 'x'])
+            ->assertStatus(422);
+        $this->actingAs($manager)->post('/changeSaleStatus', ['sale_id' => $sale->id, 'status' => 1, 'details' => 'Reopen'])
+            ->assertRedirect();
+        $this->assertSame(2, (int) $sale->fresh()->status);                    // opening makes it pending
+        $audit = json_decode($sale->audits()->latest('id')->value('data'), true);
+        $this->assertSame(['status' => 1, 'stored_status' => 2], $audit['changes_made']);
+
+        // hold: needs a hold permission and a valid state
+        $this->actingAs($noter)->getJson('/changeSaleHoldStatus?id=' . $sale->id . '&status=1')->assertForbidden();
+        $this->actingAs($manager)->getJson('/changeSaleHoldStatus?id=' . $sale->id . '&status=7')->assertStatus(422);
+
+        // approving a hold only for a sale that is waiting for approval
+        $approver = $this->staff('Pat Approver', 'sale-pending-hold-mark-approved');
+        $this->actingAs($approver)->postJson('/updatePendingOnHoldStatus', ['sale_id' => $sale->id, 'status' => 1])
+            ->assertStatus(409);
+
+        $this->actingAs($manager)->get('/sales/999999/edit')->assertNotFound();      // B-07
+    }
+
+    public function test_an_applicants_status_change_is_validated(): void
+    {
+        $a = $this->applicant();
+        $admin = $this->staff('Ada Admin', 'applicant-delete');
+        $this->actingAs($admin)->postJson('/changeStatus', ['applicant_id' => $a->id, 'status' => 5, 'details' => 'x'])
+            ->assertStatus(422);
+        $this->actingAs($admin)->post('/changeStatus', ['applicant_id' => $a->id, 'status' => 0, 'details' => 'Left'])
+            ->assertRedirect();
+        $this->assertSame(0, (int) $a->fresh()->status);
     }
 }

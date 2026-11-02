@@ -59,6 +59,12 @@ class SaleController extends Controller
         $this->middleware('permission:sale-create')->only(['create', 'store']);
         $this->middleware('permission:sale-create,sale-edit')->only(['getOfficeUnits']);
         $this->middleware('permission:sale-edit')->only(['edit', 'update']);
+        // These had no check: any signed-in account could close, reopen or hold any sale.
+        $this->middleware('permission:sale-change-status,sale-open-change-status,sale-closed-change-status,'
+            . 'sale-direct-change-status,sale-hold-change-status,sale-rejected-change-status,sale-mark-as-open-close')
+            ->only(['changeSaleStatus']);
+        $this->middleware('permission:sale-mark-on-hold,sale-open-mark-on-hold,sale-direct-mark-on-hold,sale-hold-change-status')
+            ->only(['changeSaleHoldStatus']);
         $this->middleware('permission:sale-blacklist')->only(['toggleBlacklist']);
         $this->middleware('permission:sale-view,sale-direct-view,sale-open-view')->only(['show', 'fetchApplicantsWithinSaleRadiusIndex', 'getApplicantsBySaleRadius']);
         $this->middleware('permission:sale-delete')->only(['destroy']);
@@ -865,7 +871,7 @@ class SaleController extends Controller
     }
     public function edit($id, Request $request)
     {
-        $sale = Sale::with('documents')->find($id);
+        $sale = Sale::with('documents')->findOrFail($id);      // an unknown id is a 404, not a crash
 
         if ($sale->status == 4) {
             $offices = Office::where('status', 4)
@@ -4279,7 +4285,7 @@ class SaleController extends Controller
                 $path = $applicant->applicant_cv;
                 if ($path && str_starts_with($path, 'uploads/')) {
                     $fullPath = public_path($path);
-                    if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
+                    if (file_exists($fullPath) && (!$applicant->is_blocked || Gate::allows('applicant-show-blocked-data'))) {
                         $url = asset($path);
                         return '<a href="' . $url . '" title="Download CV" target="_blank" class="text-decoration-none">
                                     <iconify-icon icon="solar:download-square-bold" class="text-success fs-28"></iconify-icon>
@@ -4294,7 +4300,7 @@ class SaleController extends Controller
                 $path = $applicant->updated_cv;
                 if ($path && str_starts_with($path, 'uploads/')) {
                     $fullPath = public_path($path);
-                    if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
+                    if (file_exists($fullPath) && (!$applicant->is_blocked || Gate::allows('applicant-show-blocked-data'))) {
                         $url = asset($path);
                         return '<a href="' . $url . '" title="Download Updated CV" target="_blank" class="text-decoration-none">
                                     <iconify-icon icon="solar:download-square-bold" class="text-primary fs-28"></iconify-icon>
@@ -4420,145 +4426,99 @@ class SaleController extends Controller
     }
     public function storeSaleNotes(Request $request)
     {
+        $v = $request->validate([
+            'sale_id' => 'required|integer|exists:sales,id',
+            'details' => 'required|string|max:5000',
+        ]);
         $user = Auth::user();
+        $sale = Sale::findOrFail((int) $v['sale_id']);
+        $sale_notes = $v['details'] . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
 
-        $sale_id = $request->input('sale_id');
-        $details = $request->input('details');
-        $sale_notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
+        // One transaction: older notes are only switched off if the new one is saved.
+        DB::transaction(function () use ($sale, $sale_notes, $user) {
+            Sale::whereKey($sale->id)->update(['sale_notes' => $sale_notes]);   // as before: no model events
+            $sale->refresh();                                                     // the audit records the new note
 
-        $updateData = ['sale_notes' => $sale_notes];
+            SaleNote::where('sale_id', $sale->id)->update(['status' => 0]);
+            $sale_note = SaleNote::create([
+                'sale_id' => $sale->id,
+                'sale_note' => $sale_notes,
+                'user_id' => $user->id,
+            ]);
+            $sale_note->update(['sales_notes_uid' => md5($sale_note->id)]);
 
-        Sale::where('id', $sale_id)->update($updateData);
+            (new ActionObserver())->customSaleAudit($sale, 'sale_notes');
 
-        SaleNote::where('sale_id', $sale_id)->update(['status' => 0]);
-
-        $sale_note = SaleNote::create([
-            'sale_id' => $sale_id,
-            'sale_note' => $sale_notes,
-            'user_id' => $user->id,
-        ]);
-
-        $sale_note->update(['sales_notes_uid' => md5($sale_note->id)]);
-
-        $sale = Sale::findOrFail($sale_id);
-        $audit = new ActionObserver();
-        $audit->customSaleAudit($sale, 'sale_notes');
-
-        // Disable previous module note
-        ModuleNote::where([
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale'
-        ])
-            ->where('status', 1)
-            ->update(['status' => 0]);
-
-        // Create new module note
-        $moduleNote = ModuleNote::create([
-            'details' => $sale_notes,
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale',
-            'user_id' => $user->id,
-        ]);
-
-        $moduleNote->update(['module_note_uid' => md5($moduleNote->id)]);
+            $this->replaceSaleModuleNote($sale->id, $sale_notes, $user->id, false);
+        });
 
         return redirect()->to(url()->previous());
     }
+
+    /** Switch off the sale's current module note and add the new one (the CRM's "latest note"). */
+    private function replaceSaleModuleNote(int $saleId, string $details, int $userId, bool $withStatus = true): void
+    {
+        ModuleNote::where(['module_noteable_id' => $saleId, 'module_noteable_type' => 'Horsefly\Sale'])
+            ->where('status', 1)->update(['status' => 0]);
+        $moduleNote = ModuleNote::create(array_merge([
+            'details' => $details,
+            'module_noteable_id' => $saleId,
+            'module_noteable_type' => 'Horsefly\Sale',
+            'user_id' => $userId,
+        ], $withStatus ? ['status' => 1] : []));
+        $moduleNote->update(['module_note_uid' => md5($moduleNote->id)]);
+    }
     public function changeSaleStatus(Request $request)
     {
-        $user = Auth::user();
-
-        $sale_id = $request->input('sale_id');
-        $status = $request->input('status');
-        $details = $request->input('details');
-        $sale_notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
-
-        if ($status == 1) {
-            $updateData = [
-                'sale_notes' => $sale_notes,
-                'status' => 2, // Assuming 2 is for pending
-                'is_on_hold' => false,
-                'is_re_open' => false
-            ];
-        } else {
-            $updateData = [
-                'sale_notes' => $sale_notes,
-                'status' => $status, // Assuming 2 is for pending
-                'is_on_hold' => false,
-                'is_re_open' => false
-            ];
-        }
-
-        $sale = Sale::findOrfail($sale_id);
-        $sale->update($updateData);
-
-        $audit = new ActionObserver();
-        $audit->changeSaleStatus($sale, ['status' => $status]);
-
-        // Disable previous module note
-        ModuleNote::where([
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale'
-        ])
-            ->where('status', 1)
-            ->update(['status' => 0]);
-
-        // Create new module note
-        $moduleNote = ModuleNote::create([
-            'details' => $sale_notes,
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale',
-            'user_id' => $user->id,
-            'status' => 1,
+        $v = $request->validate([
+            'sale_id' => 'required|integer|exists:sales,id',
+            'status' => 'required|in:0,1,2,3',          // closed, open, pending, rejected
+            'details' => 'required|string|max:5000',
         ]);
+        $user = Auth::user();
+        $status = (int) $v['status'];
+        $sale = Sale::findOrFail((int) $v['sale_id']);
+        $sale_notes = $v['details'] . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
+        // Opening a sale makes it pending (2) until it is approved.
+        $stored = $status === 1 ? 2 : $status;
 
-        $moduleNote->update(['module_note_uid' => md5($moduleNote->id)]);
+        DB::transaction(function () use ($sale, $status, $stored, $sale_notes, $user) {
+            $sale->update([
+                'sale_notes' => $sale_notes,
+                'status' => $stored,
+                'is_on_hold' => false,
+                'is_re_open' => false,
+            ]);
+            // The audit's message keeps the action asked for ("sale-opened" is the open date the
+            // exports and the portal feed read); changes_made also records what was stored.
+            (new ActionObserver())->changeSaleStatus($sale, ['status' => $status, 'stored_status' => $stored]);
+
+            $this->replaceSaleModuleNote($sale->id, $sale_notes, $user->id);
+        });
 
         return redirect()->to(url()->previous());
     }
     public function changeSaleHoldStatus(Request $request)
     {
-        $user = Auth::user();
-
-        $sale_id = $request->input('id');
-        $status = $request->input('status');
-        $details = $request->input('details');
-        $sale_notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
-
-        if (isset($request->details)) {
-            $updateData = [
-                'is_on_hold' => $status,
-                'sale_notes' => $sale_notes
-            ];
-        } else {
-            $updateData = [
-                'is_on_hold' => $status
-            ];
-        }
-
-        $sale = Sale::FindOrfail($sale_id);
-        $sale->update($updateData);
-
-        // Disable previous module note
-        ModuleNote::where([
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale'
-        ])
-            ->where('status', 1)
-            ->update(['status' => 0]);
-
-        // Create new module note
-        $moduleNote = ModuleNote::create([
-            'details' => $sale_notes,
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale',
-            'user_id' => $user->id,
+        $v = $request->validate([
+            'id' => 'required|integer|exists:sales,id',
+            'status' => 'required|in:0,1,2',            // off hold, on hold, pending approval
+            'details' => 'nullable|string|max:5000',
         ]);
+        $user = Auth::user();
+        $status = (int) $v['status'];
+        $sale = Sale::findOrFail((int) $v['id']);
+        $sale_notes = ($v['details'] ?? '') . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
 
-        $moduleNote->update(['module_note_uid' => md5($moduleNote->id)]);
+        DB::transaction(function () use ($sale, $status, $sale_notes, $user, $v) {
+            $sale->update(isset($v['details'])
+                ? ['is_on_hold' => $status, 'sale_notes' => $sale_notes]
+                : ['is_on_hold' => $status]);
 
-        $audit = new ActionObserver();
-        $audit->changeSaleOnHoldStatus($sale, ['status' => $status]);
+            $this->replaceSaleModuleNote($sale->id, $sale_notes, $user->id, false);
+
+            (new ActionObserver())->changeSaleOnHoldStatus($sale, ['status' => $status]);
+        });
 
         return redirect()->to(url()->previous());
     }
@@ -4571,6 +4531,10 @@ class SaleController extends Controller
         ]);
 
         $sale = Sale::findOrFail($request->sale_id);
+        if ((int) $sale->is_on_hold !== 2) {          // only a sale waiting for approval can be approved
+            return response()->json(['success' => false,
+                'message' => 'This sale is not waiting for on-hold approval.'], 409);
+        }
 
         if ($request->status == 1) {
             $sale->is_on_hold = 1;
