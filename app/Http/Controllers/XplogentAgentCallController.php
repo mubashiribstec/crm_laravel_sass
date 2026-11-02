@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\Xplogent\AiDialLock;
 use App\Services\Xplogent\Directory;
+use App\Services\Xplogent\XplogentClient;
 use App\Support\Xplogent;
 use Horsefly\Applicant;
 use Horsefly\CallLog;
@@ -13,7 +14,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -23,7 +23,8 @@ use Illuminate\Support\Facades\Log;
  */
 class XplogentAgentCallController extends Controller
 {
-    public function __construct(private Directory $directory, private AiDialLock $locks)
+    public function __construct(private Directory $directory, private AiDialLock $locks,
+                                private XplogentClient $xplogent)
     {
         $this->middleware('permission:xplogent-agent-call');
     }
@@ -78,33 +79,35 @@ class XplogentAgentCallController extends Controller
         if ($holder = $this->locks->heldBy($candidate['phone_e164'])) {
             return response()->json(['ok' => false, 'error' => "being called by {$holder}", 'locked_by' => $holder], 409);
         }
-        $base = rtrim((string) config('xplogent.base_url'), '/');
-        if ($base === '' || config('xplogent.api_token') === '') {
-            return response()->json(['ok' => false, 'error' => 'Xplogent is not configured (XPLOGENT_BASE_URL / XPLOGENT_API_TOKEN)'], 503);
-        }
-
-        $body = json_encode([
+        $r = $this->xplogent->post('/voip/crm/dial', [
             'phone' => $candidate['phone_e164'],
             'applicant_id' => $applicant->id,
             'sale_id' => $sale->id,
             'requested_by' => (string) Auth::user()->name,
             'brief' => ['sale' => $this->directory->saleBrief($sale), 'candidate' => $candidate],
-        ], JSON_UNESCAPED_UNICODE);
-        try {
-            $resp = Http::withHeaders(Xplogent::signedHeaders($body))->timeout(20)->withoutRedirecting()
-                ->withBody($body, 'application/json')->post($base . '/voip/crm/dial');
-        } catch (\Throwable $e) {
-            Log::warning('xplogent dial failed: ' . $e->getMessage());
-            return response()->json(['ok' => false, 'error' => 'Xplogent is not reachable'], 502);
+        ]);
+        if ($r['status'] === 0 || in_array($r['status'], [401, 404, 503], true)) {
+            // Couldn't get the request to Xplogent at all: say why and how to fix it.
+            $why = $this->xplogent->explain($r);
+            Log::warning('xplogent dial failed: ' . $why['reason']);
+
+            return response()->json(['ok' => false, 'error' => $why['reason'] . ' ' . $why['fix']],
+                $r['error'] === 'not_configured' ? 503 : 502);
         }
-        $data = $resp->json() ?? [];
+        $status = $r['status'];
 
         return response()->json([
-            'ok' => $resp->successful() && ($data['ok'] ?? false),
-            'error' => $data['error'] ?? ($resp->successful() ? null : 'Xplogent answered HTTP ' . $resp->status()),
-            'locked_by' => $data['locked_by'] ?? null,
-            'call' => $data['call'] ?? null,
-        ], $resp->successful() ? 200 : ($resp->status() >= 400 && $resp->status() < 500 ? $resp->status() : 502));
+            'ok' => $r['ok'],
+            'error' => $r['error'] ?? ($r['ok'] ? null : 'Xplogent answered HTTP ' . $status),
+            'locked_by' => $r['data']['locked_by'] ?? null,
+            'call' => $r['data']['call'] ?? null,
+        ], $status >= 200 && $status < 300 ? 200 : ($status >= 400 && $status < 500 ? $status : 502));
+    }
+
+    /** "Test connection to Xplogent": the CRM -> Xplogent direction, nothing dialled. */
+    public function check(): JsonResponse
+    {
+        return response()->json($this->xplogent->check('Agent call page: ' . Auth::user()->name));
     }
 
     /** The candidate's Xplogent call attempts (one row per call). */

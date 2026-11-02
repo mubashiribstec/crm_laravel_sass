@@ -54,6 +54,7 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     Route::get('xplogent/agent-call/queue', [\App\Http\Controllers\XplogentAgentCallController::class, 'queue'])->name('xplogent.agent-call.queue');
     Route::post('xplogent/agent-call/dial', [\App\Http\Controllers\XplogentAgentCallController::class, 'dial'])->name('xplogent.agent-call.dial');
     Route::get('xplogent/agent-call/attempts', [\App\Http\Controllers\XplogentAgentCallController::class, 'attempts'])->name('xplogent.agent-call.attempts');
+    Route::post('xplogent/agent-call/check', [\App\Http\Controllers\XplogentAgentCallController::class, 'check'])->name('xplogent.agent-call.check');
 
     Route::get('dialing/info',          [DialLockController::class, 'info'])->name('dialing.info');
     Route::post('dialing/acquire',      [DialLockController::class, 'acquire'])->name('dialing.acquire');

@@ -9,6 +9,11 @@
                 in the CRM's <code>.env</code> (the same token as on the Xplogent server).
             </div>
         @endunless
+        <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+            <button id="xpl-check" class="btn btn-sm btn-outline-primary">Test connection to Xplogent</button>
+            <span id="xpl-check-result" class="small text-muted">Checks that this CRM can reach Xplogent
+                (address, firewall, token, clocks). Nothing is dialled.</span>
+        </div>
         <div class="card">
             <div class="card-body">
                 <h5 class="card-title mb-2">1. Vacancy</h5>
@@ -104,6 +109,19 @@
         </div>`).join('') || 'No AI calls yet.';
     }
 
+    async function check(btn) {
+        btn.disabled = true;
+        const out = document.getElementById('xpl-check-result');
+        out.className = 'small text-muted'; out.textContent = 'Checking…';
+        const r = await fetch(@json(route('xplogent.agent-call.check')), {method: 'POST', credentials: 'same-origin',
+            headers: {'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}});
+        const d = await r.json().catch(() => ({ok: false, reason: 'no answer from the CRM', fix: ''}));
+        out.className = 'small ' + (d.ok ? (d.warning ? 'text-warning' : 'text-success') : 'text-danger');
+        out.textContent = d.ok ? `✓ ${d.reason} (${d.url})${d.warning ? ' ' + d.warning : ''}` : `✗ ${d.reason} ${d.fix || ''}`;
+        btn.disabled = false;
+    }
+
+    document.getElementById('xpl-check').addEventListener('click', (e) => check(e.target));
     document.getElementById('xpl-search-btn').addEventListener('click', loadSales);
     document.getElementById('xpl-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadSales(); });
     document.getElementById('xpl-sale').addEventListener('change', (e) => e.target.value && loadQueue(e.target.value));

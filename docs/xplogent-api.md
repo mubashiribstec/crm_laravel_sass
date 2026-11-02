@@ -30,7 +30,48 @@ nothing to do with the xplosip / MicroSIP caller-ID routes in `routes/api.php`.
 
 4. Give staff the `xplogent-agent-call` permission so they can use the page. Add
    `xplogent-view-transcript` for those who may read call transcripts.
-5. In Xplogent, press Settings → CRM → **Test connection**.
+5. Check both directions:
+   - in Xplogent, press Calls → Call agent → CRM → **Test connection**;
+   - here, run `php artisan xplogent:check`.
+
+   See [Network](#network).
+
+## Network
+The CRM and Xplogent call each other, so both directions must work. Plain `http://` is fine
+inside the office network.
+
+| Direction | Used for | Set where |
+|---|---|---|
+| Xplogent → CRM | summaries, vacancies, lookups, dial locks | Xplogent: Calls → Call agent → CRM address, e.g. `http://192.168.1.20:8000` |
+| CRM → Xplogent | **Call with AI** on the Agent call page | this `.env`: `XPLOGENT_BASE_URL`, e.g. `http://192.168.1.30:8765` |
+
+**Xplogent on another machine (the usual setup):**
+- On the Xplogent server, open its port to the LAN with `sudo xplogent-docker local --lan`. By
+  default it listens on that server only.
+- Allow port 8765 from this machine in its firewall, e.g.
+  `sudo ufw allow from <this CRM's IP> to any port 8765 proto tcp`.
+- Xplogent shows the exact `XPLOGENT_BASE_URL` to use under Calls → Call agent → CRM.
+- If Xplogent runs in https mode, use `https://<its domain>`.
+
+**This CRM's port** (8000 with `docker-compose.yml`) must be reachable from the Xplogent server.
+
+**Both on one server:**
+- **The CRM natively:** `XPLOGENT_BASE_URL=http://127.0.0.1:8765`.
+- **The CRM in `docker-compose.yml`:** `XPLOGENT_BASE_URL=http://host.docker.internal:8765`, because
+  `127.0.0.1` inside the container is the container itself. Xplogent must listen beyond
+  127.0.0.1 for this to work (`local --lan`).
+
+**Check this direction:** `php artisan xplogent:check`, or **Test connection to Xplogent** on the
+Agent call page. Both send a signed test request that dials nothing, and say what to fix if it
+fails:
+
+| Failure | What to fix |
+|---|---|
+| unreachable | the address, the port opening, the firewall |
+| 401 | the token or the clocks |
+| 503 | Xplogent's CRM link is off |
+
+The other direction is Xplogent's own **Test connection**.
 
 ## Signature
 
@@ -233,6 +274,10 @@ the server. Xplogent applies all its own rules: do-not-call list, calling hours,
 and the dial lock. Results come back through `call-summary`. The page lists each candidate's
 attempts: when, outcome, duration and summary. Transcripts show only for staff with
 `xplogent-view-transcript`.
+
+**Test connection to Xplogent**, at the top of the page, runs the same check as
+`php artisan xplogent:check`. When a call can't reach Xplogent, the error says why and what to
+fix.
 
 ## CV excerpt
 
