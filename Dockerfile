@@ -28,6 +28,9 @@ RUN composer install --no-interaction --prefer-dist --optimize-autoloader
 # 8. Install and build frontend
 RUN npm install && npm run build
 
+# PHP's default upload limit (2 MB) is below the CV limit the app validates (10 MB).
+RUN printf "upload_max_filesize=12M\npost_max_size=16M\n" > /usr/local/etc/php/conf.d/uploads.ini
+
 # 9. Set permissions
 RUN chown -R www-data:www-data /var/www/crm \
     && chmod -R 775 /var/www/crm/storage /var/www/crm/bootstrap/cache

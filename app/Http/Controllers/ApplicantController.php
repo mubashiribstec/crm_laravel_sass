@@ -1584,54 +1584,14 @@ class ApplicantController extends Controller
     }
     public function uploadCv(Request $request)
     {
-        // Get file and applicant data
-        $applicantId = $request->input('applicant_id');
-
-        // Fetch applicant
-        $applicant = Applicant::findOrFail($applicantId);
-
-        // ✅ Delete old CV if exists (from public directory)
-        if (!empty($applicant->applicant_cv)) {
-            $oldPath = public_path($applicant->applicant_cv);
-            if (file_exists($oldPath)) {
-                unlink($oldPath);
-            }
-        }
-
-        // Directory structure
-        $year = now()->year;
-        $month = now()->format('m');
-        $day = now()->format('d');
-
-        $directory = "uploads/resume/{$year}/{$month}/{$day}";
-        $publicPath = public_path($directory);
-
-        // Ensure directory exists
-        if (!File::exists($publicPath)) {
-            File::makeDirectory($publicPath, 0755, true, true);
-        }
-
-        // Original name & extension
-        $filenameWithExt = $request->file('resume')->getClientOriginalName();
-        $filename = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-        $extension = $request->file('resume')->getClientOriginalExtension();
-
-        // Clean filename
-        $filename = preg_replace('/[\s-]+/', '_', trim($filename));
-
-        // Unique filename
-        $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-
-        // Move file to public directory
-        $request->file('resume')->move($publicPath, $fileNameToStore);
-
-        // Store relative path in DB
-        $filePath = "{$directory}/{$fileNameToStore}";
-
-        // Update applicant
-        $applicant->update([
-            'applicant_cv' => $filePath
+        // Validated like crmuploadCv: without this, any file (a .php script too) was saved
+        // under public/ and could be executed by the web server.
+        $request->validate([
+            'resume' => 'required|file|extensions:pdf,doc,docx,txt|max:10240',
+            'applicant_id' => 'required|integer|exists:applicants,id',
         ]);
+        $applicant = Applicant::findOrFail($request->input('applicant_id'));
+        $filePath = $this->storeCvFile($applicant, 'applicant_cv', $request->file('resume'));
 
         return response()->json([
             'success' => true,
@@ -1640,66 +1600,48 @@ class ApplicantController extends Controller
             'file_url' => asset($filePath),
         ]);
     }
+
     public function crmuploadCv(Request $request)
     {
-        // ✅ Validate request
         $request->validate([
             'resume' => 'required|file|extensions:pdf,doc,docx,txt|max:10240',
             'applicant_id' => 'required|integer|exists:applicants,id',
         ]);
+        $applicant = Applicant::findOrFail($request->input('applicant_id'));
+        $relativePath = $this->storeCvFile($applicant, 'updated_cv', $request->file('resume'));
 
-        $applicantId = $request->input('applicant_id');
-
-        // 🔎 Get applicant
-        $applicant = Applicant::findOrFail($applicantId);
-
-        // 🧹 Delete old updated CV if exists (PUBLIC PATH)
-        if (!empty($applicant->updated_cv)) {
-            $oldFile = public_path($applicant->updated_cv);
-
-            if (file_exists($oldFile)) {
-                unlink($oldFile);
-            }
-        }
-
-        // 📅 Date-based directory
-        $year = now()->year;
-        $month = now()->format('m');
-        $day = now()->format('d');
-
-        $directory = "uploads/resume/{$year}/{$month}/{$day}";
-        $destinationPath = public_path($directory);
-
-        if (!File::exists($destinationPath)) {
-            File::makeDirectory($destinationPath, 0755, true, true);
-        }
-
-        // Original name & extension
-        $filenameWithExt = $request->file('resume')->getClientOriginalName();
-        $filename = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-        $extension = $request->file('resume')->getClientOriginalExtension();
-
-        // Clean filename
-        $filename = preg_replace('/[\s-]+/', '_', trim($filename));
-
-        // Unique filename
-        $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-
-
-        // 🚚 Move file to public directory
-        $request->file('resume')->move($destinationPath, $fileNameToStore);
-
-        // ✅ Save relative path in DB
-        $relativePath = $directory . '/' . $fileNameToStore;
-        $applicant->update(['updated_cv' => $relativePath]);
-
-        // 📤 Response
         return response()->json([
             'success' => true,
             'message' => 'File uploaded successfully',
             'file_path' => $relativePath,
             'file_url' => asset($relativePath),
         ]);
+    }
+
+    /**
+     * Save an uploaded CV under public/uploads/resume/YYYY/MM/DD, point $column at it, and
+     * only then remove the file it replaces (before, a failed upload lost the old CV).
+     * The random part keeps the name from being guessed from the upload time.
+     */
+    private function storeCvFile(Applicant $applicant, string $column, \Illuminate\Http\UploadedFile $file): string
+    {
+        $directory = 'uploads/resume/' . now()->format('Y/m/d');
+        File::ensureDirectoryExists(public_path($directory), 0755);
+
+        $name = preg_replace('/[^A-Za-z0-9_]+/', '_', pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME));
+        $name = trim(substr((string) $name, 0, 80), '_') ?: 'cv';
+        $fileName = $name . '_' . time() . '_' . Str::lower(Str::random(8)) . '.'
+            . strtolower($file->getClientOriginalExtension());
+        $file->move(public_path($directory), $fileName);
+
+        $path = $directory . '/' . $fileName;
+        $old = (string) $applicant->{$column};
+        $applicant->update([$column => $path]);
+        if ($old !== '' && $old !== $path && str_starts_with($old, 'uploads/resume/') && is_file(public_path($old))) {
+            @unlink(public_path($old));
+        }
+
+        return $path;
     }
     public function export(Request $request)
     {
