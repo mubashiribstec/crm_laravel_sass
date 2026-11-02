@@ -16,7 +16,7 @@ class XplogentQueueTest extends XplogentTestCase
         $sale = $this->sale();
         $this->sale(['status' => 0]);                       // closed: not listed
         $this->sale(['is_on_hold' => 1]);                   // on hold: not listed
-        $r = $this->signed('/api/xplogent/sales/open', ['search' => 'care LS6'])->assertOk();
+        $r = $this->signed('/api/xplogent/sales/open', ['search' => 'care LS6'])->assertOk()->assertJson(['ok' => true]);
         $this->assertSame([$sale->id], array_column($r->json('sales'), 'sale_id'));
         $this->assertSame('LS6', $r->json('sales.0.postcode_district'));
         $this->assertSame('Oak Care Group', $r->json('sales.0.office_name'));
@@ -29,7 +29,8 @@ class XplogentQueueTest extends XplogentTestCase
         $this->applicant(['lat' => 51.5, 'lng' => -0.12]);                         // London: outside 15 km
         $other = JobTitle::factory()->create(['name' => 'chef', 'job_category_id' => $this->category->id]);
         $this->applicant(['job_title_id' => $other->id]);                            // different title
-        $r = $this->signed('/api/xplogent/campaigns/queue', ['sale_id' => $sale->id, 'radius_km' => 15])->assertOk();
+        $r = $this->signed('/api/xplogent/campaigns/queue', ['sale_id' => $sale->id, 'radius_km' => 15])->assertOk()
+            ->assertJson(['ok' => true]);
 
         $this->assertSame([$near->id], array_column($r->json('candidates'), 'applicant_id'));
         $c = $r->json('candidates.0');

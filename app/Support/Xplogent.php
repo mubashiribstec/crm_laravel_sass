@@ -34,9 +34,10 @@ class Xplogent
         ];
     }
 
+    /** A reply in the documented shape: always `ok: true` unless $data says `ok: false` itself. */
     public static function ok(array $data = [], int $status = 200): JsonResponse
     {
-        return response()->json(['api_version' => self::API_VERSION] + $data, $status);
+        return response()->json(array_merge(['api_version' => self::API_VERSION, 'ok' => true], $data), $status);
     }
 
     public static function error(int $status, string $code, string $message, array $extra = []): JsonResponse

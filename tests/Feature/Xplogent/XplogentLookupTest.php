@@ -14,7 +14,7 @@ class XplogentLookupTest extends XplogentTestCase
             'applicant_landline' => '01132000000']);
         foreach (['+447700900123' => 'mobile', '07700 900123' => 'mobile', '+447700900456' => 'secondary',
                      '0113 200 0000' => 'landline', '+441132000000' => 'landline'] as $phone => $kind) {
-            $r = $this->signed('/api/xplogent/contact-lookup', ['phone' => $phone])->assertOk();
+            $r = $this->signed('/api/xplogent/contact-lookup', ['phone' => $phone])->assertOk()->assertJson(['ok' => true]);
             $this->assertTrue($r->json('found'));
             $this->assertSame($a->id, $r->json('contact.applicant_id'));
             $this->assertSame($kind, $r->json('contact.phone_kind'), $phone);

@@ -110,7 +110,7 @@ curl -s http://crm.lan/api/xplogent/sales/open -H "Authorization: Bearer $TOKEN"
 
 ## Errors
 
-Errors come back as `{"ok": false, "error": "<code>", "message": "..."}`. The codes are:
+Every successful reply carries `"api_version": 2` and `"ok": true`. Errors come back as `{"ok": false, "error": "<code>", "message": "..."}`. The codes are:
 
 - 401 `unauthorized` / `stale`
 - 404 (contact-lookup: `{"ok": true, "found": false}`)
