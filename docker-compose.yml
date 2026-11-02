@@ -9,10 +9,15 @@ services:
     working_dir: /var/www
     volumes:
       - ./:/var/www
-    ports:
-      - "9000:9000"
+    # PHP-FPM (9000) is reached by nginx over the "laravel" network only. Publishing it let
+    # anyone on the LAN talk FastCGI to PHP directly, which can run arbitrary code.
     networks:
       - laravel
+    # Xplogent on another machine needs nothing here: set XPLOGENT_BASE_URL to its LAN
+    # address in .env. Xplogent on this same server: XPLOGENT_BASE_URL=http://host.docker.internal:8765
+    # (127.0.0.1 inside this container is the container itself).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   nginx:
     image: nginx:alpine
@@ -39,6 +44,10 @@ services:
       - "127.0.0.1:3306:3306"   # this machine only; never publish MySQL to the network
     volumes:
       - mysql_data:/var/lib/mysql
+    # On the app's network, so the app reaches it as DB_HOST=mysql (port 3306 is no longer
+    # published to the LAN, so the app can't go through the host's address).
+    networks:
+      - laravel
 
 volumes:
   mysql_data:
