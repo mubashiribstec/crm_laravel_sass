@@ -117,7 +117,7 @@ return [
             'host' => env('DB_FREEPBX_HOST', ''),
             'port' => env('DB_FREEPBX_PORT', '22'),
             'database' => env('DB_FREEPBX_DATABASE', ''),
-            'username' => env('DB_FREEPBX_USERNAME', 'root'),
+            'username' => env('DB_FREEPBX_USERNAME', ''),
             'password' => env('DB_FREEPBX_PASSWORD', ''),
             'charset' => 'utf8mb4',
             'collation' => 'utf8mb4_unicode_ci',

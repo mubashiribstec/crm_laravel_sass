@@ -33,11 +33,10 @@ services:
     container_name: laravel-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"   # ✅ Allow empty root password
-      MYSQL_ROOT_PASSWORD: ""             # ✅ Empty root password
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
       MYSQL_DATABASE: crm_kbp           # ✅ Optional: auto-create this DB
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"   # this machine only; never publish MySQL to the network
     volumes:
       - mysql_data:/var/lib/mysql
 
