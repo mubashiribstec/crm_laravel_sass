@@ -24,12 +24,13 @@
             <div class="card-body">
                 <h5 class="card-title mb-2">2. Candidate</h5>
                 <p class="text-muted small mb-2">Candidates within the radius who may be called (blocked, not interested,
-                    no job, CV already sent, recently called or being called by someone are left out).
+                    no job, CV already sent or being called by someone right now are left out). "Last called" shows
+                    when anyone (the AI or a recruiter) last called them.
                     <span id="xpl-skipped"></span></p>
                 <div class="table-responsive">
                     <table class="table table-sm align-middle">
-                        <thead><tr><th>Name</th><th>Number</th><th>Area</th><th>Distance</th><th>Last note</th><th></th></tr></thead>
-                        <tbody id="xpl-candidates"><tr><td colspan="6" class="text-muted">Pick a vacancy first.</td></tr></tbody>
+                        <thead><tr><th>Name</th><th>Number</th><th>Area</th><th>Distance</th><th>Last called</th><th>Last note</th><th></th></tr></thead>
+                        <tbody id="xpl-candidates"><tr><td colspan="7" class="text-muted">Pick a vacancy first.</td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -63,9 +64,9 @@
     async function loadQueue(saleId) {
         currentSale = saleId;
         const body = document.getElementById('xpl-candidates');
-        body.innerHTML = '<tr><td colspan="6" class="text-muted">Loading…</td></tr>';
+        body.innerHTML = '<tr><td colspan="7" class="text-muted">Loading…</td></tr>';
         const data = await get(@json(route('xplogent.agent-call.queue')) + '?sale_id=' + saleId);
-        if (!data.ok) { body.innerHTML = `<tr><td colspan="6" class="text-danger">${esc(data.error)}</td></tr>`; return; }
+        if (!data.ok) { body.innerHTML = `<tr><td colspan="7" class="text-danger">${esc(data.error)}</td></tr>`; return; }
         const s = data.sale;
         document.getElementById('xpl-sale-info').textContent = `${s.job_title} · ${s.salary || ''} · ${s.timing || ''}`;
         const sk = Object.entries(data.skipped || {}).filter(([, n]) => n > 0).map(([k, n]) => `${k.replace('_', ' ')} ${n}`).join(', ');
@@ -73,10 +74,11 @@
         body.innerHTML = (data.candidates || []).map((c) => `<tr>
             <td>${esc(c.name)}</td><td>${esc(c.phone_display)} <span class="badge bg-light text-dark">${esc(c.phone_kind)}</span></td>
             <td>${esc(c.postcode_district)}</td><td>${c.distance_km} km</td>
+            <td class="small">${c.last_called_at ? esc(new Date(c.last_called_at).toLocaleString()) : '<span class="text-muted">never</span>'}</td>
             <td class="small text-muted" style="max-width:320px">${esc(c.last_note)}</td>
             <td class="text-nowrap"><button class="btn btn-sm btn-primary" data-call="${c.applicant_id}">Call with AI</button>
-                <button class="btn btn-sm btn-outline-secondary" data-attempts="${c.applicant_id}" data-name="${esc(c.name)}">Attempts</button></td>
-        </tr>`).join('') || '<tr><td colspan="6" class="text-muted">No one to call for this vacancy right now.</td></tr>';
+                <button class="btn btn-sm btn-outline-primary" data-attempts="${c.applicant_id}" data-name="${esc(c.name)}">Attempts</button></td>
+        </tr>`).join('') || '<tr><td colspan="7" class="text-muted">No one to call for this vacancy right now.</td></tr>';
     }
 
     async function dial(applicantId, btn) {

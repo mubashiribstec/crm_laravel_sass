@@ -56,6 +56,9 @@ class XplogentLookupTest extends XplogentTestCase
             . 'Care assistant 2015 - 2019 at Oak House. ' . str_repeat('NVQ Level 3. ', 300));
         $this->applicant(['applicant_phone' => '07700900123', 'applicant_cv' => 'uploads/resume/test/cv.txt']);
         $cv = $this->signed('/api/xplogent/contact-lookup', ['phone' => '+447700900123'])->json('contact.cv_excerpt');
+        $queued = $this->signed('/api/xplogent/campaigns/queue', ['sale_id' => $this->sale()->id])
+            ->assertOk()->json('candidates.0.cv_excerpt');
+        $this->assertSame($cv, $queued);                                    // the queue carries the same excerpt
         @unlink("$dir/cv.txt");
         @rmdir($dir);
         $this->assertStringContainsString('Care assistant 2015 - 2019', $cv);

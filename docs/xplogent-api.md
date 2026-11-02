@@ -244,7 +244,9 @@ When it's on:
 1. The newest CV (`updated_cv`, else `applicant_cv`, under `public/` or `storage/`) is turned
    into text with phpword or pdf-to-text. pdf-to-text needs `poppler-utils` on the server.
 2. Email addresses, phone numbers, postcodes, dates and date-of-birth phrases are removed.
-3. The text is capped at 2,000 characters and cached for a day.
+3. The text is capped at 2,000 characters and cached for 7 days (a new CV file is read again).
+
+`campaigns/queue` adds the excerpt only for the candidates it returns.
 
 ## Tests
 

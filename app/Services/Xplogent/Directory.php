@@ -136,7 +136,8 @@ class Directory
             'applicants.applicant_phone_secondary', 'applicants.applicant_landline', 'applicants.applicant_postcode',
             'applicants.job_title_id', 'applicants.is_blocked', 'applicants.is_temp_not_interested',
             'applicants.is_no_job', 'applicants.is_callback_enable', 'applicants.is_no_response',
-            'applicants.is_circuit_busy', 'applicants.paid_status', 'applicants.updated_at'];
+            'applicants.is_circuit_busy', 'applicants.paid_status', 'applicants.updated_at',
+            'applicants.applicant_cv', 'applicants.updated_cv'];
         $rows = $this->queue->withDistance($this->queue->radiusQuery($sale, $radiusKm, [], $columns), $sale)->get();
 
         $ids = $rows->pluck('id')->all();
@@ -193,7 +194,16 @@ class Directory
         usort($out, fn ($x, $y) => [$x['distance_km'], $x['last_called_at'] !== null]
             <=> [$y['distance_km'], $y['last_called_at'] !== null]);
 
-        return ['candidates' => array_slice($out, 0, $limit), 'skipped' => $skipped];
+        $out = array_slice($out, 0, $limit);
+        if (config('xplogent.share_cv_excerpt')) {      // only for those returned: reading CVs is the slow part
+            $byId = $rows->keyBy('id');
+            foreach ($out as &$c) {
+                $c['cv_excerpt'] = $this->cv->excerpt($byId[$c['applicant_id']]);
+            }
+            unset($c);
+        }
+
+        return ['candidates' => $out, 'skipped' => $skipped];
     }
 
     // ── contact card (contact-lookup) ─────────────────────────────────────────
