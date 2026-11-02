@@ -7,6 +7,10 @@ services:
     container_name: laravel-app
     restart: unless-stopped
     working_dir: /var/www
+    environment:
+      # The DB lives in the mysql container on the laravel network, not on
+      # 127.0.0.1 (inside this container 127.0.0.1 is itself). Overrides .env.
+      DB_HOST: mysql
     volumes:
       - ./:/var/www
     # PHP-FPM (9000) is reached by nginx over the "laravel" network only. Publishing it let
