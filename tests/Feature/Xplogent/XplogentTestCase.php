@@ -28,6 +28,8 @@ abstract class XplogentTestCase extends TestCase
 
     private static int $phoneSeq = 0;
 
+    private int $tsSeq = 0;
+
     protected User $ai;
     protected JobCategory $category;
     protected JobTitle $title;
@@ -69,7 +71,10 @@ abstract class XplogentTestCase extends TestCase
     {
         $body = json_encode($data);
         $token ??= self::TOKEN;
-        $ts = (string) ($ts ?? time());
+        // Each request gets its own timestamp (as Xplogent's retries do), so the CRM's replay
+        // guard doesn't treat two identical requests in the same second as one replayed.
+        // Strictly increasing within a test: now - 250 + n (inside the 300 s skew window).
+        $ts = (string) ($ts ?? (time() - 250 + $this->tsSeq++));
 
         return $this->call('POST', $uri, [], [], [], [
             'CONTENT_TYPE' => 'application/json',

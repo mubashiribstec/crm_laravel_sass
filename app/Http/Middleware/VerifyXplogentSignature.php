@@ -6,6 +6,7 @@ use App\Support\Xplogent;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -45,9 +46,15 @@ class VerifyXplogentSignature
         if (abs(time() - (int) $ts) > (int) config('xplogent.max_skew', 300)) {
             return $this->log($request, Xplogent::error(401, 'stale', 'timestamp skew too large: check both clocks'), $started);
         }
-        $want = Xplogent::sign($body, $token, $ts);
-        if (!hash_equals($want, (string) $request->header('X-Xplogent-Signature-V2', ''))) {
+        $signature = (string) $request->header('X-Xplogent-Signature-V2', '');
+        if (!hash_equals(Xplogent::sign($body, $token, $ts), $signature)) {
             return $this->log($request, Xplogent::error(401, 'unauthorized', 'bad signature'), $started);
+        }
+        // Each signed request is accepted once: a copied request can't be replayed within the
+        // clock window (Xplogent re-signs every retry with a fresh timestamp).
+        $window = 2 * (int) config('xplogent.max_skew', 300);
+        if (!Cache::add('xplogent:sig:' . hash('sha256', $signature), 1, $window)) {
+            return $this->log($request, Xplogent::error(401, 'replay', 'this request was already used'), $started);
         }
         // The CRM's observers audit every change as the signed-in user (or user 1
         // when there is none), so for this request "Xplogent AI" is that user. In
