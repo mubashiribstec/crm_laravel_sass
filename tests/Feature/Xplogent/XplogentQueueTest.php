@@ -34,7 +34,7 @@ class XplogentQueueTest extends XplogentTestCase
         $this->assertSame([$near->id], array_column($r->json('candidates'), 'applicant_id'));
         $c = $r->json('candidates.0');
         $this->assertSame('Sarah', $c['first_name']);
-        $this->assertStringStartsWith('+447700900', $c['phone_e164']);
+        $this->assertStringStartsWith('+447700901', $c['phone_e164']);
         $this->assertSame('mobile', $c['phone_kind']);
         $this->assertEqualsWithDelta(1.0, $c['distance_km'], 0.2);
         $this->assertSame('LS7', $c['postcode_district']);

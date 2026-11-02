@@ -26,6 +26,8 @@ abstract class XplogentTestCase extends TestCase
 
     protected const TOKEN = 'test-token-0123456789abcdef0123456789';
 
+    private static int $phoneSeq = 0;
+
     protected User $ai;
     protected JobCategory $category;
     protected JobTitle $title;
@@ -108,7 +110,9 @@ abstract class XplogentTestCase extends TestCase
             'applicant_email' => 'sarah.' . uniqid() . '@example.org',
             'applicant_email_secondary' => null,
             'applicant_postcode' => 'LS7 3AA',
-            'applicant_phone' => '07700 900' . str_pad((string) random_int(0, 999), 3, '0', STR_PAD_LEFT),
+            // Unique per applicant (a shared number would share a dial lock), and outside the
+            // 07700 900xxx range the tests use for explicit numbers.
+            'applicant_phone' => '07700 901' . str_pad((string) (++self::$phoneSeq % 1000), 3, '0', STR_PAD_LEFT),
             'applicant_phone_secondary' => null,
             'applicant_landline' => null,
             'applicant_cv' => null, 'updated_cv' => null,
