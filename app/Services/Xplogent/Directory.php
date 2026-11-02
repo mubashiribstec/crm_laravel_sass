@@ -33,16 +33,22 @@ class Directory
     }
 
     // ── sales ─────────────────────────────────────────────────────────────────
+    /** Open vacancies Xplogent may call about: the same rules as notCallable(), in SQL. */
     public function openSales(string $search = '', int $limit = 50): array
     {
         $query = Sale::query()
             ->with(['jobTitle:id,name', 'jobCategory:id,name', 'office:id,office_name', 'unit:id,unit_name'])
             ->where('status', 1)->where('is_on_hold', 0)
             ->where(fn ($q) => $q->where('is_blacklist', false)->orWhereNull('is_blacklist'))
+            ->whereDoesntHave('office', fn ($q) => $q->where('is_blacklist', true))
+            ->whereDoesntHave('unit', fn ($q) => $q->where('is_blacklist', true))
+            ->whereNotNull('lat')->whereNotNull('lng')
+            ->where(fn ($q) => $q->whereNull('cv_limit')->orWhere('cv_limit', '<=', 0)
+                ->orWhereRaw('(SELECT COUNT(*) FROM cv_notes WHERE cv_notes.sale_id = sales.id AND cv_notes.status = 1) < sales.cv_limit'))
             ->orderByDesc('id');
 
         foreach (array_filter(preg_split('/\s+/', trim($search))) as $word) {
-            $like = '%' . $word . '%';
+            $like = '%' . addcslashes($word, '%_\\') . '%';     // a "%" or "_" is a letter, not a wildcard
             $query->where(function ($q) use ($like) {
                 $q->where('sale_postcode', 'like', $like)
                     ->orWhereHas('jobTitle', fn ($t) => $t->where('name', 'like', $like))
@@ -91,6 +97,12 @@ class Directory
         }
         if ($sale->is_blacklist) {
             return 'the vacancy is blacklisted';
+        }
+        if (optional($sale->office)->is_blacklist) {
+            return "the vacancy's client (office) is blacklisted";
+        }
+        if (optional($sale->unit)->is_blacklist) {
+            return "the vacancy's site (unit) is blacklisted";
         }
         if ($sale->lat === null || $sale->lng === null) {
             return 'the vacancy has no location coordinates';

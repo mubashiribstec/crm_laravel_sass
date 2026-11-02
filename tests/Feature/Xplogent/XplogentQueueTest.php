@@ -8,6 +8,8 @@ use Horsefly\CallLog;
 use Horsefly\CVNote;
 use Horsefly\DialLock;
 use Horsefly\JobTitle;
+use Horsefly\Office;
+use Horsefly\Unit;
 
 class XplogentQueueTest extends XplogentTestCase
 {
@@ -93,6 +95,38 @@ class XplogentQueueTest extends XplogentTestCase
             $this->signed('/api/xplogent/campaigns/queue', ['sale_id' => $sale->id])
                 ->assertStatus(409)->assertJson(['error' => 'sale_not_callable']);
         }
+    }
+
+    /** X-03: a vacancy the queue would refuse is not offered by sales/open either. */
+    public function test_open_sales_leaves_out_what_the_queue_refuses(): void
+    {
+        $ok = $this->sale();
+        $badOffice = $this->sale();
+        Office::whereKey($badOffice->office_id)->update(['is_blacklist' => true]);
+        $badUnit = $this->sale();
+        Unit::whereKey($badUnit->unit_id)->update(['is_blacklist' => true]);
+        $noCoords = $this->sale(['lat' => null, 'lng' => null]);
+        $full = $this->sale(['cv_limit' => 1]);
+        CVNote::create(['applicant_id' => $this->applicant()->id, 'sale_id' => $full->id,
+            'user_id' => $this->ai->id, 'status' => 1, 'details' => 'x']);
+        $inactiveCv = $this->sale(['cv_limit' => 1]);                       // an inactive CV doesn't fill it
+        CVNote::create(['applicant_id' => $this->applicant()->id, 'sale_id' => $inactiveCv->id,
+            'user_id' => $this->ai->id, 'status' => 0, 'details' => 'x']);
+
+        $listed = array_column($this->signed('/api/xplogent/sales/open', [])->assertOk()->json('sales'), 'sale_id');
+        $this->assertEqualsCanonicalizing([$ok->id, $inactiveCv->id], $listed);
+        foreach ([$badOffice, $badUnit, $noCoords, $full] as $sale) {
+            $this->signed('/api/xplogent/campaigns/queue', ['sale_id' => $sale->id])
+                ->assertStatus(409)->assertJson(['error' => 'sale_not_callable']);
+        }
+    }
+
+    /** X-26(a): search words are matched literally. */
+    public function test_open_sales_search_treats_percent_and_underscore_as_letters(): void
+    {
+        $this->sale();
+        $this->assertSame([], $this->signed('/api/xplogent/sales/open', ['search' => '%'])->assertOk()->json('sales'));
+        $this->assertSame([], $this->signed('/api/xplogent/sales/open', ['search' => '_'])->assertOk()->json('sales'));
     }
 
     public function test_the_radius_screen_and_the_queue_share_one_query(): void
