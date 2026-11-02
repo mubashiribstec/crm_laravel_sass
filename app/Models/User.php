@@ -38,7 +38,8 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
-        'deleted_at'
+        'deleted_at',
+        'sip_password',   // never serialised (APIs, JSON responses)
     ];
     protected $guarded = []; // allows all columns to be mass assignable (only if you're confident)
 
@@ -62,6 +63,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'sip_password' => 'encrypted',   // stored encrypted with APP_KEY
         ];
     }
     public function getFormattedNameAttribute()
