@@ -421,7 +421,7 @@ class RegionController extends Controller
 
                         $fullPath = public_path($path);
 
-                        if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
+                        if (file_exists($fullPath) && (!$applicant->is_blocked || Gate::allows('applicant-show-blocked-data'))) {
 
                             $url = asset($path); // direct public URL
 
@@ -442,7 +442,7 @@ class RegionController extends Controller
 
                         $fullPath = public_path($path);
 
-                        if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
+                        if (file_exists($fullPath) && (!$applicant->is_blocked || Gate::allows('applicant-show-blocked-data'))) {
 
                             $url = asset($path);
 
