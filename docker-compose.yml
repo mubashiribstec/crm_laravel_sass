@@ -10,11 +10,9 @@ services:
     environment:
       # The DB lives in the mysql container on the laravel network, not on
       # 127.0.0.1 (inside this container 127.0.0.1 is itself). Overrides .env.
+      # Everything else (APP_URL, DB_PASSWORD, XPLOGENT_*) comes from .env, which is
+      # mounted with the code. Never put passwords in this file: it is in git.
       DB_HOST: mysql
-      # This machine's address on your LAN: the CRM is reached at http://10.44.1.24:8000.
-      APP_URL: http://10.44.1.24:8000
-      # Must match MYSQL_ROOT_PASSWORD below (testing only — change it for real use).
-      DB_PASSWORD: Agf24G6IyxXTad8o6gn8
     volumes:
       - ./:/var/www/crm
     # PHP-FPM (9000) is reached by nginx over the "laravel" network only. Publishing it let
@@ -46,7 +44,7 @@ services:
     container_name: laravel-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: Agf24G6IyxXTad8o6gn8
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
       MYSQL_DATABASE: crm_kbp           # ✅ Optional: auto-create this DB
     ports:
       - "127.0.0.1:3306:3306"   # this machine only; never publish MySQL to the network
@@ -57,8 +55,13 @@ services:
     networks:
       - laravel
 
+  # Database admin UI, off by default: `docker compose --profile tools up -d phpmyadmin`.
+  # It logs in to MySQL with the root password, so it listens on this machine only.
+  # From your PC: ssh -L 8080:127.0.0.1:8080 <user>@<this server>, then open
+  # http://127.0.0.1:8080. Stop it when done: `docker compose stop phpmyadmin`.
   phpmyadmin:
-    image: phpmyadmin/phpmyadmin:latest
+    image: phpmyadmin:5.2
+    profiles: ["tools"]
     container_name: laravel-phpmyadmin
     restart: unless-stopped
     environment:
@@ -68,7 +71,7 @@ services:
       # Lets phpMyAdmin import larger SQL files.
       UPLOAD_LIMIT: 300M
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"     # never publish a DB admin tool to the network
     depends_on:
       - mysql
     networks:
