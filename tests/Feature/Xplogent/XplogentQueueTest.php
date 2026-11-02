@@ -97,6 +97,15 @@ class XplogentQueueTest extends XplogentTestCase
         }
     }
 
+    /** X-05: no AI user, no queue (the "recently called" rule would silently switch off). */
+    public function test_the_queue_needs_the_ai_user(): void
+    {
+        $sale = $this->sale();
+        config(['xplogent.ai_user_id' => null]);
+        $this->signed('/api/xplogent/campaigns/queue', ['sale_id' => $sale->id])
+            ->assertStatus(503)->assertJson(['ok' => false, 'error' => 'ai_user_missing']);
+    }
+
     /** X-03: a vacancy the queue would refuse is not offered by sales/open either. */
     public function test_open_sales_leaves_out_what_the_queue_refuses(): void
     {

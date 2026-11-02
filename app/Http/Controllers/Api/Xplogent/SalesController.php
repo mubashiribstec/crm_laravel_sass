@@ -31,12 +31,18 @@ class SalesController extends Controller
             'limit' => 'nullable|integer|min:1|max:500',
             'exclude_called_within_days' => 'nullable|integer|min:0|max:365',
         ]);
+        // Without the AI user the "recently called" rule can't be applied (it is the AI's own
+        // call log), and the calls' results couldn't be written back: refuse, like the writes.
+        $ai = Xplogent::aiUser();
+        if (!$ai) {
+            return Xplogent::error(503, 'ai_user_missing', 'XPLOGENT_AI_USER_ID is not set');
+        }
         $sale = Sale::withTrashed()->find((int) $v['sale_id']);
         if ($why = $this->directory->notCallable($sale)) {
             return Xplogent::error(409, 'sale_not_callable', $why);
         }
         $result = $this->directory->queue($sale, (float) ($v['radius_km'] ?? 15), (int) ($v['limit'] ?? 50),
-            (int) ($v['exclude_called_within_days'] ?? 14), Xplogent::aiUser()?->id);
+            (int) ($v['exclude_called_within_days'] ?? 14), $ai->id);
 
         return Xplogent::ok(['sale' => $this->directory->saleBrief($sale)] + $result);
     }

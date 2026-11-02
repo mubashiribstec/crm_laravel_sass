@@ -61,6 +61,11 @@ class XplogentAgentCallController extends Controller
     public function dial(Request $request): JsonResponse
     {
         $request->validate(['applicant_id' => 'required|integer', 'sale_id' => 'required|integer']);
+        if (!Xplogent::aiUser()) {        // the call's result would have nowhere to go
+            return response()->json(['ok' => false, 'error' => 'The Xplogent AI user is not set up, so the call\'s '
+                . 'result could not be saved. Run php artisan xplogent:make-ai-user, put its id in '
+                . 'XPLOGENT_AI_USER_ID in .env, then php artisan config:clear.'], 503);
+        }
         $applicant = Applicant::find((int) $request->input('applicant_id'));
         $sale = Sale::find((int) $request->input('sale_id'));
         if (!$applicant || !$sale) {

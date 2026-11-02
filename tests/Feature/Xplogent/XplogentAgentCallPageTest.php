@@ -76,6 +76,19 @@ class XplogentAgentCallPageTest extends XplogentTestCase
         Http::assertNothingSent();
     }
 
+    /** X-05: Call with AI needs the AI user, or the result would have nowhere to go. */
+    public function test_dial_needs_the_ai_user(): void
+    {
+        Http::fake();
+        $sale = $this->sale();
+        $a = $this->applicant(['applicant_phone' => '07700900123']);
+        config(['xplogent.ai_user_id' => null]);
+        $this->actingAs($this->staff)->postJson('/xplogent/agent-call/dial', ['applicant_id' => $a->id,
+            'sale_id' => $sale->id])->assertStatus(503)->assertJson(['ok' => false])
+            ->assertSee('xplogent:make-ai-user');
+        Http::assertNothingSent();
+    }
+
     public function test_transcripts_need_their_own_permission(): void
     {
         $a = $this->applicant();
