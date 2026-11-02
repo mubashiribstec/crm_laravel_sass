@@ -3,6 +3,8 @@
 namespace Tests\Feature\Xplogent;
 
 use App\Support\Xplogent;
+use Horsefly\ApplicantPivotSale;
+use Horsefly\CVNote;
 use Horsefly\CallLog;
 use Horsefly\DialLock;
 use Horsefly\User;
@@ -74,6 +76,41 @@ class XplogentAgentCallPageTest extends XplogentTestCase
         $this->actingAs($this->staff)->postJson('/xplogent/agent-call/dial', ['applicant_id' => $b->id,
             'sale_id' => $sale->id])->assertStatus(409);
         Http::assertNothingSent();
+    }
+
+    /** X-10: Call with AI applies the queue's exclusions for that candidate and vacancy. */
+    public function test_dial_refuses_whoever_the_queue_would_leave_out(): void
+    {
+        Http::fake(['xplogent.lan:8765/*' => Http::response(['ok' => true, 'call' => ['id' => 7]])]);
+        $sale = $this->sale();
+        $notHere = $this->applicant();
+        ApplicantPivotSale::create(['applicant_id' => $notHere->id, 'sale_id' => $sale->id]);
+        $sent = $this->applicant();
+        CVNote::create(['applicant_id' => $sent->id, 'sale_id' => $sale->id, 'user_id' => $this->ai->id,
+            'status' => 1, 'details' => 'x']);
+        $refused = ['not_interested' => $notHere, 'already_sent' => $sent,
+            'no_job' => $this->applicant(['is_no_job' => true]),
+            'closed' => $this->applicant(['paid_status' => 'close']),
+            'inactive' => $this->applicant(['status' => 0])];
+        foreach ($refused as $reason => $a) {
+            $this->actingAs($this->staff)->postJson('/xplogent/agent-call/dial', ['applicant_id' => $a->id,
+                'sale_id' => $sale->id])->assertStatus(409)->assertJson(['ok' => false, 'reason' => $reason]);
+        }
+        Http::assertNothingSent();
+
+        // Locked on a secondary number counts too; a recent AI call does not (staff may retry).
+        $second = $this->applicant(['applicant_phone_secondary' => '07700900888']);
+        DialLock::create(['phone_key' => DialLock::keyFor('07700900888'), 'full_number' => '07700900888',
+            'user_id' => $this->staff->id, 'user_name' => 'Tom Recruiter', 'call_count' => 1,
+            'locked_at' => now(), 'expires_at' => now()->addMinutes(5)]);
+        $this->actingAs($this->staff)->postJson('/xplogent/agent-call/dial', ['applicant_id' => $second->id,
+            'sale_id' => $sale->id])->assertStatus(409)->assertJson(['reason' => 'locked', 'locked_by' => 'Tom Recruiter']);
+        $recent = $this->applicant();
+        CallLog::create(['user_id' => $this->ai->id, 'applicant_id' => $recent->id, 'sale_id' => $sale->id,
+            'direction' => 'outbound', 'called_at' => now()->subDay(), 'source' => 'xplogent']);
+        $this->actingAs($this->staff)->postJson('/xplogent/agent-call/dial', ['applicant_id' => $recent->id,
+            'sale_id' => $sale->id])->assertOk()->assertJson(['ok' => true]);
+        Http::assertSentCount(1);
     }
 
     /** X-05: Call with AI needs the AI user, or the result would have nowhere to go. */

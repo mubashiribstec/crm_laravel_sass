@@ -165,16 +165,8 @@ class Directory
         $skipped = array_fill_keys(self::SKIP_REASONS, 0);
         $out = [];
         foreach ($rows as $a) {
-            $reason = match (true) {
-                (bool) $a->is_blocked => 'blocked',
-                (bool) $a->is_temp_not_interested, isset($notHere[$a->id]) => 'not_interested',
-                (bool) $a->is_no_job => 'no_job',
-                $a->paid_status === 'close' => 'closed',
-                isset($cvSent[$a->id]) => 'already_sent',
-                $this->anyLocked($a, $locked) => 'locked',
-                isset($recent[$a->id]) => 'recently_called',
-                default => '',
-            };
+            $reason = $this->reasonFor($a, isset($cvSent[$a->id]), isset($notHere[$a->id]),
+                $this->anyLocked($a, $locked), isset($recent[$a->id]));
             $phone = $reason === '' ? $this->bestPhone($a) : null;
             if ($reason === '' && $phone === null) {
                 $reason = 'no_phone';
@@ -216,6 +208,52 @@ class Directory
         }
 
         return ['candidates' => $out, 'skipped' => $skipped];
+    }
+
+    /** What the Agent call page says for each reason exclusion() can give. */
+    public const EXCLUSION_TEXT = [
+        'blocked' => 'this applicant is blocked (do not call)',
+        'not_interested' => 'this applicant is not interested (in general, or in this vacancy)',
+        'no_job' => 'this applicant is marked "no job"',
+        'closed' => "this applicant's record is closed",
+        'already_sent' => "this applicant's CV has already been sent for this vacancy",
+        'locked' => 'this applicant is being called right now',
+        'recently_called' => 'the AI called this applicant about this vacancy recently',
+    ];
+
+    /**
+     * The queue's rule for one candidate and one vacancy ('' = may be called), for a call that
+     * didn't come from the queue (the Agent call page). The same reasons, checked the same
+     * way (reasonFor). "Recently called" only applies with $calledWithinDays > 0.
+     */
+    public function exclusion(Applicant $a, Sale $sale, int $calledWithinDays = 0, ?int $aiUserId = null): string
+    {
+        $keys = array_values(array_filter(array_map([DialLock::class, 'keyFor'],
+            [$a->applicant_phone, $a->applicant_phone_secondary, $a->applicant_landline])));
+
+        return $this->reasonFor(
+            $a,
+            CVNote::where('sale_id', $sale->id)->where('applicant_id', $a->id)->exists(),
+            ApplicantPivotSale::where('sale_id', $sale->id)->where('applicant_id', $a->id)->exists(),
+            $keys !== [] && DialLock::whereIn('phone_key', $keys)->where('expires_at', '>', now())->exists(),
+            $aiUserId && $calledWithinDays > 0 && CallLog::where('user_id', $aiUserId)->where('sale_id', $sale->id)
+                ->where('applicant_id', $a->id)->where('called_at', '>=', now()->subDays($calledWithinDays))->exists(),
+        );
+    }
+
+    /** Why a candidate is left out of a vacancy's calls ('' = not left out), in priority order. */
+    private function reasonFor($a, bool $cvSent, bool $notInterestedHere, bool $locked, bool $recent): string
+    {
+        return match (true) {
+            (bool) $a->is_blocked => 'blocked',
+            (bool) $a->is_temp_not_interested, $notInterestedHere => 'not_interested',
+            (bool) $a->is_no_job => 'no_job',
+            $a->paid_status === 'close' => 'closed',
+            $cvSent => 'already_sent',
+            $locked => 'locked',
+            $recent => 'recently_called',
+            default => '',
+        };
     }
 
     // ── contact card (contact-lookup) ─────────────────────────────────────────

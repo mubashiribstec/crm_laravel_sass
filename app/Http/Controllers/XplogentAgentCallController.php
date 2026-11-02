@@ -66,23 +66,35 @@ class XplogentAgentCallController extends Controller
                 . 'result could not be saved. Run php artisan xplogent:make-ai-user, put its id in '
                 . 'XPLOGENT_AI_USER_ID in .env, then php artisan config:clear.'], 503);
         }
-        $applicant = Applicant::find((int) $request->input('applicant_id'));
+        $applicant = Applicant::whereNull('deleted_at')->find((int) $request->input('applicant_id'));
         $sale = Sale::find((int) $request->input('sale_id'));
         if (!$applicant || !$sale) {
             return response()->json(['ok' => false, 'error' => 'unknown applicant or vacancy'], 404);
         }
-        if ($applicant->is_blocked) {
-            return response()->json(['ok' => false, 'error' => 'this applicant is blocked (do not call)'], 409);
+        if ((int) $applicant->status !== 1) {
+            return response()->json(['ok' => false, 'error' => 'this applicant is inactive', 'reason' => 'inactive'], 409);
         }
         if ($why = $this->directory->notCallable($sale)) {
             return response()->json(['ok' => false, 'error' => $why], 409);
         }
+        // The queue's exclusions for this candidate and vacancy (a stale page or a direct POST
+        // must not reach someone who opted out). "Recently called" is left to staff: the page
+        // shows "Last called", and a retry after a voicemail is a normal request.
+        $reason = $this->directory->exclusion($applicant, $sale);
+        if ($reason === 'locked') {
+            $holder = collect([$applicant->applicant_phone, $applicant->applicant_phone_secondary,
+                $applicant->applicant_landline])->filter()->map(fn ($n) => $this->locks->heldBy((string) $n))
+                ->filter()->first() ?? 'another agent';
+
+            return response()->json(['ok' => false, 'error' => "being called by {$holder}", 'reason' => 'locked',
+                'locked_by' => $holder], 409);
+        }
+        if ($reason !== '') {
+            return response()->json(['ok' => false, 'error' => Directory::EXCLUSION_TEXT[$reason], 'reason' => $reason], 409);
+        }
         $candidate = $this->directory->candidateBrief($applicant, $sale);
         if (!$candidate) {
             return response()->json(['ok' => false, 'error' => 'no number Xplogent can dial'], 422);
-        }
-        if ($holder = $this->locks->heldBy($candidate['phone_e164'])) {
-            return response()->json(['ok' => false, 'error' => "being called by {$holder}", 'locked_by' => $holder], 409);
         }
         $r = $this->xplogent->post('/voip/crm/dial', [
             'phone' => $candidate['phone_e164'],
