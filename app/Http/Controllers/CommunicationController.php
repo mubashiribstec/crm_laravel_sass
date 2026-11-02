@@ -131,8 +131,12 @@ class CommunicationController extends Controller
             ->where('applicants.is_blocked', false)
             ->where('applicants.is_callback_enable', false)
             ->where('applicants.is_no_job', false)
-            ->where("job_category_id", $job_category_id)
-            ->orWhere("job_title_id", $job_title_id)
+            // Grouped: an ungrouped orWhere here cancelled the status / blocked /
+            // no-job / callback filters above, so blocked applicants were emailed.
+            ->where(function ($q) use ($job_category_id, $job_title_id) {
+                $q->where("job_category_id", $job_category_id)
+                    ->orWhere("job_title_id", $job_title_id);
+            })
             ->whereNotNull('applicant_email')
             ->get();
 
