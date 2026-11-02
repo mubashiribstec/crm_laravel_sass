@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ActionRefusedException;
 use App\Services\Xplogent\ApplicantStatusService;
 use Illuminate\Http\Request;
 
@@ -2448,18 +2449,21 @@ class ApplicantController extends Controller
                 $sale = Sale::findOrFail($request->input('sale_id'));
 
                 if ($sale->status !== 1) {
-                    throw new Exception("CV can't be sent - the sale is not active.");
+                    throw new ActionRefusedException("CV can't be sent - the sale is not active.");
                 }
 
                 if ($sale->is_on_hold != 0) {
-                    throw new Exception("CV can't be sent - the sale is currently on hold.");
+                    throw new ActionRefusedException("CV can't be sent - the sale is currently on hold.");
                 }
                 
                 if ($sale->is_blacklist) {   // was is_blacklisted, which doesn't exist, so the check never fired
-                    throw new Exception("CV can't be sent - the sale is currently blacklisted.");
+                    throw new ActionRefusedException("CV can't be sent - the sale is currently blacklisted.");
                 }
 
                 $jobTitle = JobTitle::find($sale->job_title_id);
+                if (!$jobTitle) {                   // the vacancy's job title was deleted
+                    throw new ActionRefusedException("CV can't be sent - the vacancy's job title no longer exists.");
+                }
 
                 // Decode related_titles safely and normalize
                 $relatedTitles = is_array($jobTitle->related_titles)
@@ -2478,7 +2482,7 @@ class ApplicantController extends Controller
 
                 // ✅ Check if job titles match
                 if (!in_array((int) $applicant->job_title_id, $jobTitleIds, true)) {
-                    throw new Exception("CV can't be sent - job titles don't match.");
+                    throw new ActionRefusedException("CV can't be sent - job titles don't match.");
                 }
 
                 // 🔹 Handle special conditions
@@ -2506,6 +2510,7 @@ class ApplicantController extends Controller
                 $net_sent_cv_count = $sent_cv_count - $open_cv_count;
 
                 if ($net_sent_cv_count >= $sale->cv_limit) {
+                    DB::rollBack();                 // undo what the handlers above wrote; never leave it open
                     return response()->json([
                         'success' => false,
                         'message' => 'Sorry, you can`t send more CVs for this job. The maximum CV limit has been reached.'
@@ -2514,7 +2519,7 @@ class ApplicantController extends Controller
 
                 // ✅ Check if applicant is rejected
                 if ($this->checkIfApplicantRejected($applicant, $sale->id)) {
-                    throw new Exception("Oops! This applicant has already been quality rejected for the selected position.");
+                    throw new ActionRefusedException("Oops! This applicant has already been quality rejected for the selected position.");
                 }
 
                 // 🔹 Update applicant and create related records
@@ -2548,8 +2553,14 @@ class ApplicantController extends Controller
                     'success' => true,
                     'message' => 'CV successfully sent to quality.'
                 ]);
-            } catch (Exception $e) {
-                // ❌ Rollback the transaction if something fails inside
+            } catch (ActionRefusedException $e) {
+                // A rule refused it (sale closed, on hold, titles don't match…): say why, always.
+                DB::rollBack();
+
+                return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+            } catch (\Throwable $e) {
+                // ❌ Rollback the transaction if something fails inside (Throwable: a PHP Error too,
+                // so the transaction is never left open)
                 DB::rollBack();
 
                 Log::error('Transaction failed in sendCVtoQuality', [

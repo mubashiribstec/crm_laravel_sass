@@ -32,6 +32,7 @@ use App\Support\DialLink;
 use App\Observers\ActionObserver;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\DB;
+use App\Exceptions\ActionRefusedException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 
@@ -6220,6 +6221,8 @@ class CrmController extends Controller
                 'message' => 'Validation error',
                 'errors' => $e->errors()
             ], 422);
+        } catch (ActionRefusedException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 409);
         } catch (Exception $e) {
             return response()->json([
                 'success' => false,
@@ -7280,6 +7283,8 @@ class CrmController extends Controller
                 'message' => 'Validation error',
                 'errors' => $e->errors()
             ], 422);
+        } catch (ActionRefusedException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 409);
         } catch (Exception $e) {
             return response()->json([
                 'success' => false,
@@ -7377,6 +7382,8 @@ class CrmController extends Controller
                 'message' => 'Validation error',
                 'errors' => $e->errors()
             ], 422);
+        } catch (ActionRefusedException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 409);
         } catch (Exception $e) {
             return response()->json([
                 'success' => false,
@@ -8870,79 +8877,85 @@ class CrmController extends Controller
     }
     private function crmNoJobRequestRejectedRevertToRequestAction($applicant_id, $user_id, $sale_id, $details)
     {
-        try {
-            // CVNote::where([
-            //     "applicant_id" => $applicant_id,
-            //     "sale_id" => $sale_id,
-            //     "status" => 0
-            // ])
-            // ->orderBy('id', 'desc')  // Get the latest record
-            // ->limit(1)
-            // ->update(["status" => 1]);
+        // One transaction: a failure part-way (e.g. a missing note) leaves nothing half-reverted.
+        return DB::transaction(function () use ($applicant_id, $user_id, $sale_id, $details) {
+            try {
+                // CVNote::where([
+                //     "applicant_id" => $applicant_id,
+                //     "sale_id" => $sale_id,
+                //     "status" => 0
+                // ])
+                // ->orderBy('id', 'desc')  // Get the latest record
+                // ->limit(1)
+                // ->update(["status" => 1]);
 
-            /*** get latest sent cv record */
-            $latest_sent_cv = CrmNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id
-            ])
-                ->where("moved_tab_to", "cv_sent_no_job_request")
-                ->latest()->first();
+                /*** get latest sent cv record */
+                $latest_sent_cv = CrmNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id
+                ])
+                    ->where("moved_tab_to", "cv_sent_no_job_request")
+                    ->latest()->first();
+                if (!$latest_sent_cv) {           // nothing to revert to: roll back and say why
+                    throw new ActionRefusedException("There is no 'CV sent' note to revert to for this applicant and sale.");
+                }
 
-            $all_cv_sent_saved = CrmNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id
-            ])
-                ->where("moved_tab_to", "cv_sent_saved")
-                ->where('created_at', '>=', $latest_sent_cv->created_at)
-                ->get();
+                $all_cv_sent_saved = CrmNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id
+                ])
+                    ->where("moved_tab_to", "cv_sent_saved")
+                    ->where('created_at', '>=', $latest_sent_cv->created_at)
+                    ->get();
 
-            $crm_notes_ids[0] = $latest_sent_cv->id;
-            foreach ($all_cv_sent_saved as $cv) {
-                $crm_notes_ids[] = $cv->id;
+                $crm_notes_ids[0] = $latest_sent_cv->id;
+                foreach ($all_cv_sent_saved as $cv) {
+                    $crm_notes_ids[] = $cv->id;
+                }
+
+                CrmNote::whereIn('id', $crm_notes_ids)
+                    ->update(["status" => 1]);
+
+                $crm_notes = new CrmNote();
+                $crm_notes->applicant_id = $applicant_id;
+                $crm_notes->user_id = $user_id;
+                $crm_notes->sale_id = $sale_id;
+                $crm_notes->details = $details;
+                $crm_notes->moved_tab_to = "cv_sent_no_job_request";
+                $crm_notes->save();
+
+                //update uid
+                $crm_notes->crm_notes_uid = md5((string) $crm_notes->id);
+                $crm_notes->save();
+
+                History::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id,
+                    "status" => 1
+                ])->update(["status" => 0]);
+
+                $history = new History();
+                $history->applicant_id = $applicant_id;
+                $history->user_id = $user_id;
+                $history->sale_id = $sale_id;
+                $history->stage = 'crm';
+                $history->sub_stage = 'crm_no_job_request';
+                $history->save();
+
+                //update uid
+                $history->history_uid = md5((string) $history->id);
+                $history->save();
+
+                return true; // Indicate success
+
+            } catch (Exception $e) {
+                // Log the error for debugging
+                Log::error("Error in crmRequestRejectedRevertToRequestAction: " . $e->getMessage());
+
+                // Re-throw the exception to be caught by the calling method
+                throw $e;
             }
-
-            CrmNote::whereIn('id', $crm_notes_ids)
-                ->update(["status" => 1]);
-
-            $crm_notes = new CrmNote();
-            $crm_notes->applicant_id = $applicant_id;
-            $crm_notes->user_id = $user_id;
-            $crm_notes->sale_id = $sale_id;
-            $crm_notes->details = $details;
-            $crm_notes->moved_tab_to = "cv_sent_no_job_request";
-            $crm_notes->save();
-
-            //update uid
-            $crm_notes->crm_notes_uid = md5((string) $crm_notes->id);
-            $crm_notes->save();
-
-            History::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id,
-                "status" => 1
-            ])->update(["status" => 0]);
-
-            $history = new History();
-            $history->applicant_id = $applicant_id;
-            $history->user_id = $user_id;
-            $history->sale_id = $sale_id;
-            $history->stage = 'crm';
-            $history->sub_stage = 'crm_no_job_request';
-            $history->save();
-
-            //update uid
-            $history->history_uid = md5((string) $history->id);
-            $history->save();
-
-            return true; // Indicate success
-
-        } catch (Exception $e) {
-            // Log the error for debugging
-            Log::error("Error in crmRequestRejectedRevertToRequestAction: " . $e->getMessage());
-
-            // Re-throw the exception to be caught by the calling method
-            throw $e;
-        }
+        });
     }
     /** No Job CRM Actions */
 
@@ -10207,85 +10220,91 @@ class CrmController extends Controller
     }
     private function crmRequestRejectedRevertToRequestAction($applicant_id, $user_id, $sale_id, $details)
     {
-        try {
-            CVNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id,
-                "status" => 0
-            ])
-                ->orderBy('id', 'desc')  // Get the latest record
-                ->limit(1)
-                ->update(["status" => 1]);
+        // One transaction: a failure part-way (e.g. a missing note) leaves nothing half-reverted.
+        return DB::transaction(function () use ($applicant_id, $user_id, $sale_id, $details) {
+            try {
+                CVNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id,
+                    "status" => 0
+                ])
+                    ->orderBy('id', 'desc')  // Get the latest record
+                    ->limit(1)
+                    ->update(["status" => 1]);
 
-            /*** get latest sent cv record */
-            $latest_sent_cv = CrmNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id
-            ])
-                ->where("moved_tab_to", "cv_sent")
-                ->latest()->first();
+                /*** get latest sent cv record */
+                $latest_sent_cv = CrmNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id
+                ])
+                    ->where("moved_tab_to", "cv_sent")
+                    ->latest()->first();
+                if (!$latest_sent_cv) {           // nothing to revert to: roll back and say why
+                    throw new ActionRefusedException("There is no 'CV sent' note to revert to for this applicant and sale.");
+                }
 
-            $all_cv_sent_saved = CrmNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id
-            ])
-                ->where("moved_tab_to", "cv_sent_saved")
-                ->where('created_at', '>=', $latest_sent_cv->created_at)
-                ->get();
+                $all_cv_sent_saved = CrmNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id
+                ])
+                    ->where("moved_tab_to", "cv_sent_saved")
+                    ->where('created_at', '>=', $latest_sent_cv->created_at)
+                    ->get();
 
-            $crm_notes_ids[0] = $latest_sent_cv->id;
-            foreach ($all_cv_sent_saved as $cv) {
-                $crm_notes_ids[] = $cv->id;
+                $crm_notes_ids[0] = $latest_sent_cv->id;
+                foreach ($all_cv_sent_saved as $cv) {
+                    $crm_notes_ids[] = $cv->id;
+                }
+
+                CrmNote::whereIn('id', $crm_notes_ids)
+                    ->update(["status" => 1]);
+
+                // CrmNote::where([
+                //     "applicant_id" => $applicant_id,
+                //     "sale_id" => $sale_id,
+                //     "status" => 1
+                // ])->update(["status" => 0]);
+
+                $crm_notes = new CrmNote();
+                $crm_notes->applicant_id = $applicant_id;
+                $crm_notes->user_id = $user_id;
+                $crm_notes->sale_id = $sale_id;
+                $crm_notes->details = $details;
+                $crm_notes->moved_tab_to = "cv_sent_request";
+                $crm_notes->save();
+
+                //update uid
+                $crm_notes->crm_notes_uid = md5((string) $crm_notes->id);
+                $crm_notes->save();
+
+                History::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id,
+                    "status" => 1
+                ])->update(["status" => 0]);
+
+                $history = new History();
+                $history->applicant_id = $applicant_id;
+                $history->user_id = $user_id;
+                $history->sale_id = $sale_id;
+                $history->stage = 'crm';
+                $history->sub_stage = 'crm_request';
+                $history->save();
+
+                //update uid
+                $history->history_uid = md5((string) $history->id);
+                $history->save();
+
+                return true; // Indicate success
+
+            } catch (Exception $e) {
+                // Log the error for debugging
+                Log::error("Error in crmRequestRejectedRevertToRequestAction: " . $e->getMessage());
+
+                // Re-throw the exception to be caught by the calling method
+                throw $e;
             }
-
-            CrmNote::whereIn('id', $crm_notes_ids)
-                ->update(["status" => 1]);
-
-            // CrmNote::where([
-            //     "applicant_id" => $applicant_id,
-            //     "sale_id" => $sale_id,
-            //     "status" => 1
-            // ])->update(["status" => 0]);
-
-            $crm_notes = new CrmNote();
-            $crm_notes->applicant_id = $applicant_id;
-            $crm_notes->user_id = $user_id;
-            $crm_notes->sale_id = $sale_id;
-            $crm_notes->details = $details;
-            $crm_notes->moved_tab_to = "cv_sent_request";
-            $crm_notes->save();
-
-            //update uid
-            $crm_notes->crm_notes_uid = md5((string) $crm_notes->id);
-            $crm_notes->save();
-
-            History::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id,
-                "status" => 1
-            ])->update(["status" => 0]);
-
-            $history = new History();
-            $history->applicant_id = $applicant_id;
-            $history->user_id = $user_id;
-            $history->sale_id = $sale_id;
-            $history->stage = 'crm';
-            $history->sub_stage = 'crm_request';
-            $history->save();
-
-            //update uid
-            $history->history_uid = md5((string) $history->id);
-            $history->save();
-
-            return true; // Indicate success
-
-        } catch (Exception $e) {
-            // Log the error for debugging
-            Log::error("Error in crmRequestRejectedRevertToRequestAction: " . $e->getMessage());
-
-            // Re-throw the exception to be caught by the calling method
-            throw $e;
-        }
+        });
     }
 
     /** CRM Confirmation */
@@ -11070,152 +11089,164 @@ class CrmController extends Controller
     /** CRM Decline */
     private function crmRevertDeclineToAttendedAction($applicant_id, $user_id, $sale_id, $details)
     {
-        try {
-            Applicant::where("id", $applicant_id)
-                ->update([
-                    'is_crm_interview_attended' => true
-                ]);
+        // One transaction: a failure part-way (e.g. a missing note) leaves nothing half-reverted.
+        return DB::transaction(function () use ($applicant_id, $user_id, $sale_id, $details) {
+            try {
+                Applicant::where("id", $applicant_id)
+                    ->update([
+                        'is_crm_interview_attended' => true
+                    ]);
 
-            CVNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id,
-                "status" => 0
-            ])->update(["status" => 1]);
+                CVNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id,
+                    "status" => 0
+                ])->update(["status" => 1]);
 
-            QualityNotes::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id,
-                "status" => 1
-            ])->update(["status" => 0]);
+                QualityNotes::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id,
+                    "status" => 1
+                ])->update(["status" => 0]);
 
-            /*** latest sent cv records */
-            $crm_notes_index = 0;
-            $latest_sent_cv = CrmNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id
-            ])->where("moved_tab_to", "cv_sent")
-                ->latest()->first();
+                /*** latest sent cv records */
+                $crm_notes_index = 0;
+                $latest_sent_cv = CrmNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id
+                ])->where("moved_tab_to", "cv_sent")
+                    ->latest()->first();
+                if (!$latest_sent_cv) {           // nothing to revert to: roll back and say why
+                    throw new ActionRefusedException("There is no 'CV sent' note to revert to for this applicant and sale.");
+                }
 
-            $all_cv_sent_saved = CrmNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id
-            ])
-                ->where("moved_tab_to", "cv_sent_saved")
-                ->where('created_at', '>=', $latest_sent_cv->created_at)
-                ->get();
-
-            $crm_notes_ids[$crm_notes_index++] = $latest_sent_cv->id;
-            foreach ($all_cv_sent_saved as $cv) {
-                $crm_notes_ids[$crm_notes_index++] = $cv->id;
-            }
-
-            /*** latest request records */
-            $latest_request = CrmNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id
-            ])->where("moved_tab_to", "cv_sent_request")
-                ->latest()->first();
-
-            $all_request_saved = CrmNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id
-            ])
-                ->where("moved_tab_to", "request_save")
-                ->where('created_at', '>=', $latest_request->created_at)
-                ->get();
-
-            $crm_notes_ids[$crm_notes_index++] = $latest_request->id;
-            foreach ($all_request_saved as $cv) {
-                $crm_notes_ids[$crm_notes_index++] = $cv->id;
-            }
-
-            /*** latest confirmation records */
-            $latest_confirmation = CrmNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id
-            ])->where("moved_tab_to", "request_confirm")
-                ->latest()->first();
-
-            $all_confirmation_saved = CrmNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id
-            ])
-                ->where("moved_tab_to", "interview_save")
-                ->where('created_at', '>=', $latest_confirmation->created_at)->get();
-
-            $crm_notes_ids[$crm_notes_index++] = $latest_confirmation->id;
-            foreach ($all_confirmation_saved as $cv) {
-                $crm_notes_ids[$crm_notes_index++] = $cv->id;
-            }
-
-            /*** latest rebook records */
-            $latest_rebook = CrmNote::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id
-            ])->where("moved_tab_to", "rebook")
-                ->latest()->first();
-
-            if ($latest_rebook) {
-                $all_rebook_saved = CrmNote::where([
+                $all_cv_sent_saved = CrmNote::where([
                     "applicant_id" => $applicant_id,
                     "sale_id" => $sale_id
                 ])
-                    ->where("moved_tab_to", "rebook_save")
-                    ->where('created_at', '>=', $latest_rebook->created_at)->get();
+                    ->where("moved_tab_to", "cv_sent_saved")
+                    ->where('created_at', '>=', $latest_sent_cv->created_at)
+                    ->get();
 
-                $crm_notes_ids[$crm_notes_index++] = $latest_rebook->id;
-                foreach ($all_rebook_saved as $cv) {
+                $crm_notes_ids[$crm_notes_index++] = $latest_sent_cv->id;
+                foreach ($all_cv_sent_saved as $cv) {
                     $crm_notes_ids[$crm_notes_index++] = $cv->id;
                 }
+
+                /*** latest request records */
+                $latest_request = CrmNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id
+                ])->where("moved_tab_to", "cv_sent_request")
+                    ->latest()->first();
+                if (!$latest_request) {           // nothing to revert to: roll back and say why
+                    throw new ActionRefusedException("There is no 'request' note to revert to for this applicant and sale.");
+                }
+
+                $all_request_saved = CrmNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id
+                ])
+                    ->where("moved_tab_to", "request_save")
+                    ->where('created_at', '>=', $latest_request->created_at)
+                    ->get();
+
+                $crm_notes_ids[$crm_notes_index++] = $latest_request->id;
+                foreach ($all_request_saved as $cv) {
+                    $crm_notes_ids[$crm_notes_index++] = $cv->id;
+                }
+
+                /*** latest confirmation records */
+                $latest_confirmation = CrmNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id
+                ])->where("moved_tab_to", "request_confirm")
+                    ->latest()->first();
+                if (!$latest_confirmation) {           // nothing to revert to: roll back and say why
+                    throw new ActionRefusedException("There is no 'confirmation' note to revert to for this applicant and sale.");
+                }
+
+                $all_confirmation_saved = CrmNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id
+                ])
+                    ->where("moved_tab_to", "interview_save")
+                    ->where('created_at', '>=', $latest_confirmation->created_at)->get();
+
+                $crm_notes_ids[$crm_notes_index++] = $latest_confirmation->id;
+                foreach ($all_confirmation_saved as $cv) {
+                    $crm_notes_ids[$crm_notes_index++] = $cv->id;
+                }
+
+                /*** latest rebook records */
+                $latest_rebook = CrmNote::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id
+                ])->where("moved_tab_to", "rebook")
+                    ->latest()->first();
+
+                if ($latest_rebook) {
+                    $all_rebook_saved = CrmNote::where([
+                        "applicant_id" => $applicant_id,
+                        "sale_id" => $sale_id
+                    ])
+                        ->where("moved_tab_to", "rebook_save")
+                        ->where('created_at', '>=', $latest_rebook->created_at)->get();
+
+                    $crm_notes_ids[$crm_notes_index++] = $latest_rebook->id;
+                    foreach ($all_rebook_saved as $cv) {
+                        $crm_notes_ids[$crm_notes_index++] = $cv->id;
+                    }
+                }
+
+                CrmNote::whereIn('id', $crm_notes_ids)->update(["status" => 1]);
+
+                // CrmNote::where([
+                //     "applicant_id" => $applicant_id,
+                //     "sale_id" => $sale_id,
+                //     "status" => 1
+                // ])->update(["status" => 0]);
+
+                $crm_notes = new CrmNote();
+                $crm_notes->applicant_id = $applicant_id;
+                $crm_notes->user_id = $user_id;
+                $crm_notes->sale_id = $sale_id;
+                $crm_notes->details = $details;
+                $crm_notes->moved_tab_to = "interview_attended";
+                $crm_notes->save();
+
+                //update uid
+                $crm_notes->crm_notes_uid = md5((string) $crm_notes->id);
+                $crm_notes->save();
+
+                History::where([
+                    "applicant_id" => $applicant_id,
+                    "sale_id" => $sale_id,
+                    "status" => 1
+                ])->update(["status" => 0]);
+
+                $history = new History();
+                $history->applicant_id = $applicant_id;
+                $history->user_id = $user_id;
+                $history->sale_id = $sale_id;
+                $history->stage = 'crm';
+                $history->sub_stage = 'crm_interview_attended';
+                $history->save();
+
+                //update uid
+                $history->history_uid = md5((string) $history->id);
+                $history->save();
+
+                return true; // Indicate success
+
+            } catch (\Exception $e) {
+                // Log the error for debugging
+                Log::error("Error in crmRevertDeclineToAttendedAction: " . $e->getMessage());
+
+                // Re-throw the exception to be caught by the calling method
+                throw $e;
             }
-
-            CrmNote::whereIn('id', $crm_notes_ids)->update(["status" => 1]);
-
-            // CrmNote::where([
-            //     "applicant_id" => $applicant_id,
-            //     "sale_id" => $sale_id,
-            //     "status" => 1
-            // ])->update(["status" => 0]);
-
-            $crm_notes = new CrmNote();
-            $crm_notes->applicant_id = $applicant_id;
-            $crm_notes->user_id = $user_id;
-            $crm_notes->sale_id = $sale_id;
-            $crm_notes->details = $details;
-            $crm_notes->moved_tab_to = "interview_attended";
-            $crm_notes->save();
-
-            //update uid
-            $crm_notes->crm_notes_uid = md5((string) $crm_notes->id);
-            $crm_notes->save();
-
-            History::where([
-                "applicant_id" => $applicant_id,
-                "sale_id" => $sale_id,
-                "status" => 1
-            ])->update(["status" => 0]);
-
-            $history = new History();
-            $history->applicant_id = $applicant_id;
-            $history->user_id = $user_id;
-            $history->sale_id = $sale_id;
-            $history->stage = 'crm';
-            $history->sub_stage = 'crm_interview_attended';
-            $history->save();
-
-            //update uid
-            $history->history_uid = md5((string) $history->id);
-            $history->save();
-
-            return true; // Indicate success
-
-        } catch (\Exception $e) {
-            // Log the error for debugging
-            Log::error("Error in crmRevertDeclineToAttendedAction: " . $e->getMessage());
-
-            // Re-throw the exception to be caught by the calling method
-            throw $e;
-        }
+        });
     }
 
     /** CRM Start Date */
