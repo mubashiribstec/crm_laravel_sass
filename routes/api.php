@@ -63,3 +63,19 @@ Route::prefix('sip/{token}')->group(function () {
      Route::post('/calls', [CallLogController::class, 'desktopStore'])
           ->name('api.sip.calls');
 });
+
+// ── Xplogent (AI phone agent) ──────────────────────────────────────────────
+// Signed by Xplogent with XPLOGENT_API_TOKEN (Bearer + HMAC-SHA256 V2 signature
+// and timestamp), see App\Http\Middleware\VerifyXplogentSignature and
+// docs/xplogent-api.md. Not related to the xplosip / MicroSIP routes above.
+Route::prefix('xplogent')
+     ->middleware([\App\Http\Middleware\VerifyXplogentSignature::class, 'throttle:120,1'])
+     ->group(function () {
+          Route::post('/sales/open', [\App\Http\Controllers\Api\Xplogent\SalesController::class, 'open']);
+          Route::post('/campaigns/queue', [\App\Http\Controllers\Api\Xplogent\SalesController::class, 'queue']);
+          Route::post('/contact-lookup', [\App\Http\Controllers\Api\Xplogent\ContactController::class, 'lookup']);
+          Route::post('/call-summary', [\App\Http\Controllers\Api\Xplogent\CallSummaryController::class, 'store']);
+          Route::post('/send-job-details', [\App\Http\Controllers\Api\Xplogent\JobDetailsController::class, 'send']);
+          Route::post('/dial-lock', [\App\Http\Controllers\Api\Xplogent\DialLockController::class, 'lock']);
+          Route::post('/dial-unlock', [\App\Http\Controllers\Api\Xplogent\DialLockController::class, 'unlock']);
+     });

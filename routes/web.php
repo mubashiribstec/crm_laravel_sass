@@ -48,6 +48,13 @@ Route::get('message_receive', [CommunicationController::class, 'messageReceive']
 // Route group with authentication middleware
 Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     // Click-to-dial collision control — lock a number while an agent calls it
+    // Xplogent "Agent call" page (permission: xplogent-agent-call)
+    Route::get('xplogent/agent-call', [\App\Http\Controllers\XplogentAgentCallController::class, 'index'])->name('xplogent.agent-call');
+    Route::get('xplogent/agent-call/sales', [\App\Http\Controllers\XplogentAgentCallController::class, 'sales'])->name('xplogent.agent-call.sales');
+    Route::get('xplogent/agent-call/queue', [\App\Http\Controllers\XplogentAgentCallController::class, 'queue'])->name('xplogent.agent-call.queue');
+    Route::post('xplogent/agent-call/dial', [\App\Http\Controllers\XplogentAgentCallController::class, 'dial'])->name('xplogent.agent-call.dial');
+    Route::get('xplogent/agent-call/attempts', [\App\Http\Controllers\XplogentAgentCallController::class, 'attempts'])->name('xplogent.agent-call.attempts');
+
     Route::get('dialing/info',          [DialLockController::class, 'info'])->name('dialing.info');
     Route::post('dialing/acquire',      [DialLockController::class, 'acquire'])->name('dialing.acquire');
     Route::post('dialing/release',      [DialLockController::class, 'release'])->name('dialing.release');
