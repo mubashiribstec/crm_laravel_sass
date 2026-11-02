@@ -25,7 +25,10 @@ class VacancyEmailService
      */
     public function fill(Sale $sale, string $agentName): ?array
     {
-        $unit = Unit::where('office_id', $sale->office_id)->first();
+        // The sale's own unit (an office can have several); the office's first unit only for
+        // an old sale with none.
+        $unit = ($sale->unit_id ? Unit::find($sale->unit_id) : null)
+            ?? Unit::where('office_id', $sale->office_id)->first();
         $jobCategory = JobCategory::where('id', $sale->job_category_id)->first();
 
         $replace = [
@@ -34,10 +37,10 @@ class VacancyEmailService
             optional($unit)->unit_name ?? '-',
             $sale->salary ?? '-',
             $sale->qualification ?? '-',
-            $sale->position_type ?? '-',
-            $sale->timing ?? '-',
+            $sale->position_type ?? '-',     // (job_type) is the candidate's "full time / part time" on purpose:
+            $sale->timing ?? '-',            // sales.job_type is the CRM's internal specialist/regular class
             $sale->experience ?? '-',
-            '-',
+            \App\Support\Xplogent::district($sale->sale_postcode) ?: '-',    // (location): e.g. "LS6"
         ];
         $placeholders = ['(agent_name)', '(job_category)', '(unit_name)', '(salary)', '(qualification)',
             '(job_type)', '(timing)', '(experience)', '(location)'];

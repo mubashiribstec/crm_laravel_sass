@@ -6,6 +6,8 @@ use App\Http\Controllers\CommunicationController;
 use Horsefly\ApplicantNote;
 use Horsefly\EmailTemplate;
 use Horsefly\ModuleNote;
+use Horsefly\SentEmail;
+use Horsefly\Unit;
 
 /** The recruiter screens behave as before the shared services were extracted. */
 class XplogentRegressionTest extends XplogentTestCase
@@ -50,7 +52,26 @@ class XplogentRegressionTest extends XplogentTestCase
         $r = $this->actingAs($recruiter)->get('/send-email-to-applicant?sale_id=' . $sale->id)->assertOk();
         $this->assertSame('A job near you', $r->viewData('subject'));
         $this->assertStringContainsString('Jane Recruiter: Care', $r->viewData('formattedMessage'));
-        $this->assertStringContainsString('at Oak House, £12.60 per hour', $r->viewData('formattedMessage'));
+        $this->assertStringContainsString('at Oak House, £12.60 per hour, LS6', $r->viewData('formattedMessage'));
+    }
+
+    /** X-09: an office with several units: the email names the sale's own unit (recruiter screen and API). */
+    public function test_vacancy_email_names_the_sales_own_unit(): void
+    {
+        EmailTemplate::create(['slug' => 'send_job_vacancy_details', 'title' => 'Send Job Vacancy Details',
+            'subject' => 'A job near you', 'from_email' => 'jobs@example.org', 'is_active' => 1,
+            'template' => '(job_category) at (unit_name), (job_type), (location)']);
+        $sale = $this->sale();                                              // office's first unit: Oak House
+        $elm = Unit::factory()->create(['office_id' => $sale->office_id, 'unit_name' => 'Elm Lodge']);
+        $sale->update(['unit_id' => $elm->id]);
+
+        $page = $this->actingAs($this->staff('Jane Recruiter', 'email-index'))
+            ->get('/send-email-to-applicant?sale_id=' . $sale->id)->assertOk()->viewData('formattedMessage');
+        $this->assertStringContainsString('Care at Elm Lodge, Full time, LS6', $page);
+
+        $id = $this->signed('/api/xplogent/send-job-details', ['applicant_id' => $this->applicant()->id,
+            'sale_id' => $sale->id, 'email' => 'sarah@example.org', 'call_id' => 3])->assertOk()->json('sent_email_id');
+        $this->assertStringContainsString('Care at Elm Lodge, Full time, LS6', SentEmail::find($id)->template);
     }
 
     public function test_bulk_vacancy_email_skips_blocked_no_job_and_callback_applicants(): void
