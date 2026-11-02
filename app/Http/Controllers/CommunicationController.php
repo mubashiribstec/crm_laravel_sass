@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Xplogent\VacancyEmailService;
 use Illuminate\Http\Request;
 use Horsefly\Sale;
 use Horsefly\Unit;
@@ -77,37 +78,12 @@ class CommunicationController extends Controller
 
         $user_name = Auth::user()->name;
 
-        $category = ($JobCategory ? ucwords($JobCategory->name) : '-');
-        $unit_name = ($unit ? $unit->unit_name : '-');
-        $salary = $sale->salary ?? '-';
-        $qualification = $sale->qualification ?? '-';
-        $job_type = $sale->position_type ?? '-';
-        $timing = $sale->timing ?? '-';
-        $experience = $sale->experience ?? '-';
-        $location = '-';
-
-        // Fill template placeholders
-        $replace = [
-            $user_name,
-            optional($JobCategory)->name ?? '-',
-            optional($unit)->unit_name ?? '-',
-            $sale->salary ?? '-',
-            $sale->qualification ?? '-',
-            $sale->position_type ?? '-',
-            $sale->timing ?? '-',
-            $sale->experience ?? '-',
-            '-',
-        ];
-        $prev_val = ['(agent_name)', '(job_category)', '(unit_name)', '(salary)', '(qualification)', '(job_type)', '(timing)', '(experience)', '(location)'];
-
+        // Template filling shared with the Xplogent API (App\Services\Xplogent\VacancyEmailService).
         $formattedMessage = '';
         $subject = '';
-
-        $template = EmailTemplate::where('slug', 'send_job_vacancy_details')->where('is_active', 1)->first();
-        if ($template && !empty($template->template)) {
-            $newPhrase = str_replace($prev_val, $replace, $template->template);
-            $formattedMessage = nl2br($newPhrase);
-            $subject = $template->subject;
+        if ($filled = app(VacancyEmailService::class)->fill($sale, $user_name)) {
+            $formattedMessage = $filled['body'];
+            $subject = $filled['subject'];
         }
 
         return view('emails.send-email-to-applicant', compact('sale', 'unit', 'subject', 'formattedMessage', 'emails'));

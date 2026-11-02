@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Xplogent\ApplicantStatusService;
 use Illuminate\Http\Request;
 
 // Import necessary models
@@ -1196,135 +1197,14 @@ class ApplicantController extends Controller
         try {
             DB::beginTransaction();
 
-            $applicant_id = $request->input('applicant_id');
-            $details = $request->input('details');
-            $notes_reason = $request->input('reason');
-            $applicant_notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
-
-            $updateData = ['applicant_notes' => $applicant_notes];
-            $movedTabTo = '';
-
-            switch ($notes_reason) {
-                case 'blocked':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_no_response' => false,
-                        'is_blocked' => true,
-                        'is_callback_enable' => false,
-                        'is_temp_not_interested' => false,
-                    ]));
-                    $movedTabTo = 'blocked';
-                    break;
-
-                case 'casual':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_no_response' => false,
-                        'is_blocked' => false,
-                        'is_callback_enable' => false,
-                        'is_temp_not_interested' => false,
-                    ]));
-                    $movedTabTo = 'casual';
-                    break;
-
-                case 'no_response':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_circuit_busy' => false,
-                        'is_no_response' => true,
-                        'is_callback_enable' => false,
-                        'is_blocked' => false,
-                        'is_temp_not_interested' => false,
-                    ]));
-                    $movedTabTo = 'no response';
-                    break;
-
-                case 'no_job':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_no_response' => false,
-                        'is_callback_enable' => false,
-                        'is_blocked' => false,
-                        'is_no_job' => true,
-                        'is_temp_not_interested' => false,
-                    ]));
-                    $movedTabTo = 'no job';
-                    break;
-
-                case 'circuit_busy':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_temp_not_interested' => false,
-                        'is_callback_enable' => false,
-                        'is_no_response' => false,
-                        'is_circuit_busy' => true,
-                        'is_blocked' => false,
-                        'is_no_job' => false,
-                    ]));
-                    $movedTabTo = 'circuit busy';
-                    break;
-
-                case 'not_interested':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_temp_not_interested' => true,
-                        'is_no_response' => false,
-                        'is_callback_enable' => false,
-                        'is_circuit_busy' => false,
-                        'is_blocked' => false,
-                        'is_no_job' => false,
-                    ]));
-                    $movedTabTo = 'not interested';
-                    break;
-
-                case 'callback':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_temp_not_interested' => false,
-                        'is_callback_enable' => true,
-                        'is_no_response' => false,
-                        'is_circuit_busy' => false,
-                        'is_blocked' => false,
-                        'is_no_job' => false,
-                    ]));
-                    $movedTabTo = 'callback';
-                    break;
-            }
-
-            // Save applicant note
-            $applicantNote = ApplicantNote::create([
-                'details' => $applicant_notes,
-                'applicant_id' => $applicant_id,
-                'moved_tab_to' => $movedTabTo,
-                'user_id' => $user->id,
-            ]);
-
-            $applicantNote->update([
-                'note_uid' => md5($applicantNote->id),
-            ]);
-
-            // Disable previous module notes
-            ModuleNote::where([
-                'module_noteable_id' => $applicant_id,
-                'module_noteable_type' => 'Horsefly\Applicant',
-            ])
-                ->where('status', 1)
-                ->update(['status' => 0]);
-
-            // Add new module note
-            $moduleNote = ModuleNote::create([
-                'details' => $applicant_notes,
-                'module_noteable_id' => $applicant_id,
-                'module_noteable_type' => 'Horsefly\Applicant',
-                'user_id' => $user->id,
-            ]);
-
-            $moduleNote->update([
-                'module_note_uid' => md5($moduleNote->id),
-            ]);
-
-            // Log audit
-            $applicant = Applicant::where('id', $applicant_id)
-                ->select('applicant_name', 'applicant_notes', 'id')
-                ->first();
-
-            Log::info('Updated request for applicant', $applicant->toArray());
-
-            $observer = new ActionObserver();
-            $observer->customApplicantAudit($applicant, 'applicant_notes');
+            // Flags, notes, module note and audit: shared with the Xplogent API
+            // (App\Services\Xplogent\ApplicantStatusService), so both write the same rows.
+            app(ApplicantStatusService::class)->apply(
+                (int) $request->input('applicant_id'),
+                (string) $request->input('reason'),
+                (string) $request->input('details'),
+                $user
+            );
 
             DB::commit();
 

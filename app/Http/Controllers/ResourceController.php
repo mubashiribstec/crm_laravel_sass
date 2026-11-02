@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Xplogent\SaleInterestService;
 use Illuminate\Http\Request;
 
 use Horsefly\Sale;
@@ -4511,8 +4512,8 @@ class ResourceController extends Controller
             $applicant_ids = $request->input('applicant_ids', []);
             $sale_ids = $request->input('sale_ids', []);
 
-            $details = 'Applicant marked as interested on sale';
-            $notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
+            // Shared with the Xplogent API (App\Services\Xplogent\SaleInterestService).
+            $interest = app(SaleInterestService::class);
 
             if (!empty($applicant_ids) && !empty($sale_ids)) {
                 foreach ($applicant_ids as $index => $applicant_id) {
@@ -4520,50 +4521,7 @@ class ResourceController extends Controller
                     if (!$sale_id) {
                         continue; // skip if missing
                     }
-
-                    // Find existing pivot
-                    $pivotSale = ApplicantPivotSale::where([
-                        'applicant_id' => $applicant_id,
-                        'sale_id' => $sale_id,
-                    ])->first();
-
-                    if ($pivotSale) {
-                        // Mark as interested
-                        $pivotSale->update(['is_interested' => true]);
-
-                        // Delete related range notes
-                        NotesForRangeApplicant::where('applicants_pivot_sales_id', $pivotSale->id)->delete();
-
-                        $pivotSale->delete();
-                    }
-
-                    // Check if applicant has NO pivot sale records at all
-                    $hasPivotRecord = ApplicantPivotSale::where('applicant_id', $applicant_id)->exists();
-
-                    if (!$hasPivotRecord) {
-                        Applicant::where('id', $applicant_id)
-                            ->update(['is_temp_not_interested' => false]);
-                    }
-
-                    // Deactivate previous active notes
-                    ModuleNote::where([
-                        'module_noteable_id' => $applicant_id,
-                        'module_noteable_type' => 'Horsefly\Applicant',
-                        'status' => 1
-                    ])->update(['status' => 0]);
-
-                    // Create a new note
-                    $moduleNote = ModuleNote::create([
-                        'details' => $notes,
-                        'user_id' => $user->id,
-                        'module_noteable_id' => $applicant_id,
-                        'module_noteable_type' => 'Horsefly\Applicant',
-                        'status' => 1
-                    ]);
-
-                    $moduleNote->update([
-                        'module_note_uid' => md5($moduleNote->id)
-                    ]);
+                    $interest->revertNotInterested((int) $applicant_id, (int) $sale_id, $user);
                 }
             }
 
@@ -4592,46 +4550,8 @@ class ResourceController extends Controller
             $applicant_id = $request->input('applicant_id');
             $sale_id = $request->input('sale_id');
             $details = $request->input('details');
-            $notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
-
-            // Create pivot sale entry
-            $pivotSale = ApplicantPivotSale::create([
-                'applicant_id' => $applicant_id,
-                'sale_id' => $sale_id
-            ]);
-
-            $pivotSale->update([
-                'pivot_uid' => md5($pivotSale->id)
-            ]);
-
-            // Add notes for range
-            $notesForRange = NotesForRangeApplicant::create([
-                'applicants_pivot_sales_id' => $pivotSale->id,
-                'reason' => $notes,
-            ]);
-
-            $notesForRange->update([
-                'range_uid' => md5($notesForRange->id)
-            ]);
-
-            // Disable previous active module notes
-            ModuleNote::where([
-                'module_noteable_id' => $applicant_id,
-                'module_noteable_type' => 'Horsefly\Applicant',
-                'status' => 1
-            ])->update(['status' => 0]);
-
-            // Create new module note
-            $moduleNote = ModuleNote::create([
-                'details' => $notes,
-                'user_id' => $user->id,
-                'module_noteable_id' => $applicant_id,
-                'module_noteable_type' => 'Horsefly\Applicant'
-            ]);
-
-            $moduleNote->update([
-                'module_note_uid' => md5($moduleNote->id)
-            ]);
+            // Shared with the Xplogent API (App\Services\Xplogent\SaleInterestService).
+            app(SaleInterestService::class)->markNotInterested((int) $applicant_id, (int) $sale_id, (string) $details, $user);
 
             DB::commit();
             return redirect()->back()->with('success', 'Applicant marked as not interested successfully.');

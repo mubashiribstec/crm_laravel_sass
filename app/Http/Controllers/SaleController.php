@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Xplogent\CandidateQueueService;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 
@@ -4018,40 +4019,6 @@ class SaleController extends Controller
             return response()->json(['error' => 'Sale location coordinates are missing.'], 422);
         }
 
-        $lat = (float) $sale->lat;
-        $lng = (float) $sale->lng;
-
-        // --- Resolve which job_title_ids applicants must match ---
-        // Always includes the sale's own title. If that title has related_titles
-        // (JSON array or comma-separated string), those are merged in too.
-        $titleIds = collect([$sale->job_title_id]);
-
-        if ($sale->jobTitle && !empty($sale->jobTitle->related_titles)) {
-            $raw = $sale->jobTitle->related_titles;
-
-            // Normalize into a plain array of title names, regardless of stored format
-            if (is_array($raw)) {
-                $relatedNames = $raw;
-            } else {
-                $decoded = json_decode($raw, true);
-                $relatedNames = is_array($decoded)
-                    ? $decoded
-                    : array_filter(array_map('trim', explode(',', $raw)));
-            }
-
-            if (!empty($relatedNames)) {
-                $relatedIds = JobTitle::whereIn('name', $relatedNames)->pluck('id');
-                $titleIds = $titleIds->merge($relatedIds);
-            }
-        }
-
-        $titleIds = $titleIds
-            ->filter() // drop null/empty
-            ->map(fn($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
-
         $filters = [
             'status_filter'    => $request->input('status_filter', ''),
             'cv_status_filter' => $request->input('cv_status_filter', ''),
@@ -4063,25 +4030,10 @@ class SaleController extends Controller
             ->where('status', 1)
             ->count();
 
-        $latestModuleNoteSub = DB::table('module_notes')
-            ->select('module_noteable_id', 'details', 'created_at')
-            ->where('module_noteable_type', Applicant::class)
-            ->whereIn('id', function ($query) {
-                $query->select(DB::raw('MAX(id)'))
-                    ->from('module_notes')
-                    ->where('module_noteable_type', Applicant::class)
-                    ->groupBy('module_noteable_id');
-            });
-
-        $latestApplicantNoteSub = DB::table('applicant_notes')
-            ->select('applicant_id', 'details', 'created_at')
-            ->whereIn('id', function ($query) {
-                $query->select(DB::raw('MAX(id)'))
-                    ->from('applicant_notes')
-                    ->groupBy('applicant_id');
-            });
-
-        $model = Applicant::query()
+        // The candidate query is shared with the Xplogent campaign queue
+        // (App\Services\Xplogent\CandidateQueueService): title + related titles,
+        // base filters, haversine radius, list filters and the latest note.
+        $model = app(CandidateQueueService::class)->radiusQuery($sale, $radius, $filters)
             ->with([
                 'cv_notes' => fn($q) => $q
                     ->select('id', 'applicant_id', 'sale_id', 'status', 'created_at')
@@ -4090,33 +4042,6 @@ class SaleController extends Controller
                 'jobCategory:id,name',
                 'jobSource:id,name',
             ])
-            ->select([
-                'applicants.*',
-                'job_titles.name as job_title_name',
-                'job_categories.name as job_category_name',
-                'job_sources.name as job_source_name',
-                DB::raw('COALESCE(latest_module_notes.details, latest_applicant_notes.details) AS notes_details'),
-                DB::raw('COALESCE(latest_module_notes.created_at, latest_applicant_notes.created_at, applicants.updated_at) AS notes_created_at'),
-            ])
-            ->leftJoinSub($latestModuleNoteSub, 'latest_module_notes', function ($join) {
-                $join->on('applicants.id', '=', 'latest_module_notes.module_noteable_id');
-            })
-            ->leftJoinSub($latestApplicantNoteSub, 'latest_applicant_notes', function ($join) {
-                $join->on('applicants.id', '=', 'latest_applicant_notes.applicant_id');
-            })
-            ->leftJoin('job_titles', 'applicants.job_title_id', '=', 'job_titles.id')
-            ->leftJoin('job_categories', 'applicants.job_category_id', '=', 'job_categories.id')
-            ->leftJoin('job_sources', 'applicants.job_source_id', '=', 'job_sources.id')
-            ->where('applicants.status', 1)
-            ->whereNull('applicants.deleted_at')
-            ->where('applicants.is_in_nurse_home', 0)
-            ->whereNotNull('applicants.lat')
-            ->whereNotNull('applicants.lng')
-            ->whereIn('applicants.job_title_id', $titleIds) // <-- sale's title + related titles, not user-selectable
-            ->whereRaw(
-                '(6371 * acos(cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))) <= ?',
-                [$lat, $lng, $lat, $radius]
-            )
             ->selectRaw("
             CASE
                 WHEN applicants.paid_status = 'close' THEN 1
@@ -4127,9 +4052,6 @@ class SaleController extends Controller
                 ELSE 6
             END AS paid_status_order
         ", [$sale_id, $sale_id]);
-
-        // Title / category / source / Open-Sent status filters
-        $this->applyRadiusApplicantFilters($model, $sale_id, $filters, false);
 
         // Sorting logic
         if ($request->has('order')) {
