@@ -1,0 +1,7 @@
+# gitleaks: the default rules, plus the fixed token the Xplogent feature tests sign with.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fixed, non-secret test values"
+paths = ['''tests/Feature/Xplogent/.*''']
