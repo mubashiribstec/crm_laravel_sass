@@ -11,6 +11,10 @@ services:
       # The DB lives in the mysql container on the laravel network, not on
       # 127.0.0.1 (inside this container 127.0.0.1 is itself). Overrides .env.
       DB_HOST: mysql
+      # This machine's address on your LAN: the CRM is reached at http://10.44.1.24:8000.
+      APP_URL: http://10.44.1.24:8000
+      # Must match MYSQL_ROOT_PASSWORD below (testing only — change it for real use).
+      DB_PASSWORD: Agf24G6IyxXTad8o6gn8
     volumes:
       - ./:/var/www
     # PHP-FPM (9000) is reached by nginx over the "laravel" network only. Publishing it let
@@ -42,7 +46,7 @@ services:
     container_name: laravel-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: Agf24G6IyxXTad8o6gn8
       MYSQL_DATABASE: crm_kbp           # ✅ Optional: auto-create this DB
     ports:
       - "127.0.0.1:3306:3306"   # this machine only; never publish MySQL to the network
