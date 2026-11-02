@@ -15,7 +15,7 @@ return new class extends Migration
             $table->bigIncrements('id');
             $table->string('title')->unique(); // e.g. "welcome_email"
             $table->string('slug')->unique();
-            $table->longText('template')->nullable()->default('Null');
+            $table->longText('template')->nullable();   // no default: MySQL 8 refuses one on TEXT columns
             $table->string('from_email', 255)->nullable()->default('Null');
             $table->string('subject', 255)->nullable()->default('Null');
             $table->boolean('is_active')->default(1);
