@@ -37,10 +37,11 @@ class CallSummaryWriter
         private SaleInterestService $interest,
         private Directory $directory,
         private VacancyEmailService $emails,
+        private AiDialLock $locks,
     ) {
     }
 
-    /** @return array{duplicate: bool, call_log_id: ?int} */
+    /** @return array{duplicate: bool, call_log_id: ?int, lock_released?: bool} */
     public function write(array $p, User $ai): array
     {
         $callId = (int) $p['call_id'];
@@ -56,7 +57,7 @@ class CallSummaryWriter
         $sale = !empty($p['sale_id']) ? Sale::withTrashed()->find((int) $p['sale_id']) : null;
 
         try {
-            return DB::transaction(function () use ($p, $ai, $callId, $outcome, $direction, $candidatePhone, $applicant, $sale) {
+            $result = DB::transaction(function () use ($p, $ai, $callId, $outcome, $direction, $candidatePhone, $applicant, $sale) {
                 $log = CallLog::create([
                     'user_id' => $ai->id,
                     'applicant_id' => $applicant?->id,
@@ -90,6 +91,17 @@ class CallSummaryWriter
             }
             throw $e;
         }
+
+        // The call is over: its dial lock has no reason to outlive it (best effort; it expires anyway).
+        try {
+            $result['lock_released'] = $candidatePhone !== ''
+                && $this->locks->releaseAfterCall($candidatePhone, $ai, $this->time($p['started_at'] ?? null));
+        } catch (\Throwable $e) {
+            report($e);
+            $result['lock_released'] = false;
+        }
+
+        return $result;
     }
 
     private function recordOutcome(Applicant $applicant, ?Sale $sale, string $outcome, array $p, User $ai): void

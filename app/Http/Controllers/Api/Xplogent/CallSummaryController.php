@@ -41,6 +41,6 @@ class CallSummaryController extends Controller
             return Xplogent::ok(['ok' => true, 'duplicate' => true]);
         }
 
-        return Xplogent::ok(['ok' => true, 'call_log_id' => $result['call_log_id']]);
+        return Xplogent::ok(['call_log_id' => $result['call_log_id'], 'lock_released' => $result['lock_released'] ?? false]);
     }
 }

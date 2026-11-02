@@ -82,6 +82,24 @@ class AiDialLock
             ->update(['expires_at' => now(), 'lock_token' => null]) > 0;
     }
 
+    /**
+     * A call's summary arrived: end the AI's lock on that number, as insurance (Xplogent
+     * releases its locks itself). Only a lock taken no later than the call started (plus a
+     * minute for clock drift) is ended, so a late summary can't free a newer call's lock;
+     * without a start time nothing is released. A recruiter's lock is never touched.
+     */
+    public function releaseAfterCall(string $phone, User $ai, ?\Carbon\Carbon $startedAt): bool
+    {
+        $key = DialLock::keyFor($phone);
+        if ($key === null || $startedAt === null) {
+            return false;
+        }
+
+        return DialLock::where('phone_key', $key)->where('user_id', $ai->id)->where('expires_at', '>', now())
+            ->where('locked_at', '<=', $startedAt->copy()->addSeconds(60))
+            ->update(['expires_at' => now(), 'lock_token' => null]) > 0;
+    }
+
     /** Whether someone else holds an unexpired lock on this number (for the Agent call page). */
     public function heldBy(string $phone): ?string
     {

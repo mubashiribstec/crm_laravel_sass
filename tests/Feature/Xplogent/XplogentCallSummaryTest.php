@@ -7,6 +7,7 @@ use Horsefly\ApplicantNote;
 use Horsefly\ApplicantPivotSale;
 use Horsefly\CallLog;
 use Horsefly\CVNote;
+use Horsefly\DialLock;
 use Horsefly\ModuleNote;
 use Horsefly\XplogentCallEvent;
 
@@ -98,6 +99,33 @@ class XplogentCallSummaryTest extends XplogentTestCase
         $this->signed('/api/xplogent/call-summary', ['call_id' => 78, 'test' => true, 'outcome' => 'callback',
             'applicant_id' => $a->id])->assertOk()->assertJson(['test' => true]);
         $this->assertSame(1, XplogentCallEvent::count());
+    }
+
+    /** X-07: the summary ends the AI's lock for that call, never a newer call's or a recruiter's. */
+    public function test_a_summary_releases_that_calls_dial_lock_only(): void
+    {
+        $lock = fn (string $number, int $userId, string $name, $lockedAt) => DialLock::create([
+            'phone_key' => DialLock::keyFor($number), 'full_number' => $number, 'user_id' => $userId,
+            'user_name' => $name, 'lock_token' => 'tok-' . $number, 'call_count' => 1,
+            'locked_at' => $lockedAt, 'expires_at' => now()->addMinutes(10)]);
+        $started = now()->subMinutes(3);
+
+        $a = $this->applicant(['applicant_phone' => '07700900123']);
+        $lock('07700900123', $this->ai->id, 'Xplogent AI', $started->copy()->subSeconds(5));
+        $this->summary($a, 'callback', ['started_at' => $started->toIso8601String()])
+            ->assertOk()->assertJson(['lock_released' => true]);
+        $this->assertFalse(DialLock::where('phone_key', DialLock::keyFor('07700900123'))->first()->expires_at->isFuture());
+
+        $b = $this->applicant(['applicant_phone' => '07700900124']);       // a newer AI call holds the lock
+        $lock('07700900124', $this->ai->id, 'Xplogent AI', now());
+        $this->summary($b, 'no_answer', ['to' => '+447700900124', 'started_at' => $started->toIso8601String()])
+            ->assertOk()->assertJson(['lock_released' => false]);
+        $c = $this->applicant(['applicant_phone' => '07700900125']);       // a recruiter holds it
+        $recruiter = $this->staff('Tom Recruiter');
+        $lock('07700900125', $recruiter->id, 'Tom Recruiter', $started->copy()->subMinute());
+        $this->summary($c, 'callback', ['to' => '+447700900125', 'started_at' => $started->toIso8601String()])
+            ->assertOk()->assertJson(['lock_released' => false]);
+        $this->assertSame(2, DialLock::where('expires_at', '>', now())->count());
     }
 
     public function test_unanswered_attempts_log_calls_and_the_last_one_marks_no_response(): void
