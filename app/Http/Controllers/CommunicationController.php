@@ -434,17 +434,30 @@ class CommunicationController extends Controller
     /*************************************** */
     public function messageReceive(Request $request)
     {
-        Log::info('Received message: ' . json_encode($request)); // Log the incoming request for debugging
+        // The gateway's URL carries a shared secret (?token=...). This route is outside the
+        // login, and anyone who found it could add messages to any applicant.
+        $expected = (string) config('services.sms_webhook.token');
+        if ($expected === '' || !hash_equals($expected, (string) $request->query('token', ''))) {
+            Log::warning('message_receive refused: ' . ($expected === '' ? 'SMS_WEBHOOK_TOKEN is not set' : 'bad token'));
+            return response()->json(['message' => 'forbidden'], 403);
+        }
+        // Metadata only: no message text or full phone numbers in the logs.
+        Log::info('Received SMS', ['from_tail' => substr((string) $request->input('phoneNumber'), -4),
+            'length' => strlen((string) $request->input('message'))]);
         try {
-            $phoneNumber_gsm = $request->input('phoneNumber');
+            $phoneNumber_gsm = (string) $request->input('phoneNumber');
             $phoneNumber = preg_replace('/^(\+44|44)/', '0', $phoneNumber_gsm);
-            $message = $request->input('message');
-            $msg_id = substr(md5(time()), 0, 14);
-            $date_time = $request->input('time');
-            $date_time_arr = explode(" ", $date_time);
-            $date_res = $date_time_arr[0];
-            $date = str_replace("/", "-", $date_res);
-            $time = $date_time_arr[1];
+            $message = (string) $request->input('message');
+            $msg_id = substr(md5(uniqid('', true)), 0, 14);
+            // "dd/mm/yyyy HH:MM:SS" from the gateway; a missing or odd value falls back to now.
+            $date_time_arr = explode(' ', trim((string) $request->input('time')), 2);
+            $date = str_replace('/', '-', $date_time_arr[0] ?? '');
+            $time = $date_time_arr[1] ?? '';
+            try {
+                $receivedAt = Carbon::parse(trim($date . ' ' . $time));
+            } catch (\Throwable) {
+                $receivedAt = now();
+            }
 
             $data = [];
 
@@ -479,10 +492,11 @@ class CommunicationController extends Controller
                 $applicant_msg->msg_id = $msg_id;
                 $applicant_msg->message = $message;
                 $applicant_msg->phone_number = $phoneNumber;
-                $applicant_msg->date = $date;
-                $applicant_msg->time = $time;
-                $applicant_msg->created_at = Carbon::parse($date . '' . $time)->toDateTimeString();
-                $applicant_msg->updated_at = Carbon::parse($date . '' . $time)->toDateTimeString();
+                // Parsed values: the DATE/TIME columns reject the gateway's raw "dd-mm-yyyy".
+                $applicant_msg->date = $receivedAt->toDateString();
+                $applicant_msg->time = $receivedAt->format('H:i:s');
+                $applicant_msg->created_at = $receivedAt->toDateTimeString();
+                $applicant_msg->updated_at = $receivedAt->toDateTimeString();
                 $applicant_msg->status = 'incoming';
                 $applicant_msg->save();
 
@@ -491,7 +505,8 @@ class CommunicationController extends Controller
                 return response()->json(['message' => 'Phone number not found in Applicant'], 404);
             }
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Failed to save message: ' . $e->getMessage()], 500);
+            Log::error('message_receive failed: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to save message'], 500);
         }
     }
     public function sendChatBoxMsg(Request $request)

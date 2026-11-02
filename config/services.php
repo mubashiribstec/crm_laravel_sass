@@ -47,4 +47,9 @@ return [
         'token' => env('MICROSIP_API_TOKEN'),
     ],
 
+    // Inbound SMS from the GSM gateway (GET /message_receive?token=...). Empty = refused.
+    'sms_webhook' => [
+        'token' => env('SMS_WEBHOOK_TOKEN', ''),
+    ],
+
 ];
