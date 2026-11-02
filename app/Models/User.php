@@ -50,7 +50,13 @@ class User extends Authenticatable
 
     public function hasPermission(string $permission): bool
     {
-        return $this->hasPermissionTo($permission);
+        // A permission name that isn't in the database (not seeded yet, or a typo in a
+        // middleware list) means "not allowed", never a 500.
+        try {
+            return $this->hasPermissionTo($permission);
+        } catch (\Spatie\Permission\Exceptions\PermissionDoesNotExist) {
+            return false;
+        }
     }
 
     /**

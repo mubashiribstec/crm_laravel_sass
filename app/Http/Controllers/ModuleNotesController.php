@@ -29,10 +29,13 @@ class ModuleNotesController extends Controller
 {
     public function store(Request $request)
     {
+        // Notes (and the flags they can change) need note permissions; the controller used to
+        // accept any logged-in account. Each screen has its own "*-add-note" permission.
+        abort_unless($this->hasPermissionLike('-add-note'), 403, 'You do not have permission to add notes.');
         try {
             $input = $request->all();
-            $input['module'] = filter_var($input['module'], FILTER_SANITIZE_STRING);
-            $input['details'] = filter_var($input['details'], FILTER_SANITIZE_STRING);
+            $input['module'] = strip_tags((string) ($input['module'] ?? ''));
+            $input['details'] = strip_tags((string) ($input['details'] ?? ''));
             $request->replace($input);
 
             $user = Auth::user();
@@ -175,11 +178,12 @@ class ModuleNotesController extends Controller
     }
     public function getModuleNotesHistory(Request $request)
     {
+        abort_unless($this->hasPermissionLike('-view-notes-history') || $this->hasPermissionLike('-view-note'), 403);
         try {
             // Validate the incoming request to ensure 'id' is provided and is a valid integer
             $request->validate([
-                'id' => 'required|integer',  // Assuming 'module_notes' is the table name and 'id' is the primary key
-                'module' => 'required|string'
+                'id' => 'required|integer',
+                'module' => 'required|in:Office,Sale,Unit,Applicant',   // becomes a class name below
             ]);
 
             $model_class = 'Horsefly\\' . $request->module;
@@ -211,9 +215,10 @@ class ModuleNotesController extends Controller
     }
     public function getModuleUpdateHistory(Request $request)
     {
+        abort_unless($this->hasPermissionLike('-view-notes-history') || $this->hasPermissionLike('-view-note'), 403);
         try {
             $validator = Validator::make($request->all(), [
-                'module' => 'required',
+                'module' => 'required|in:Office,Sale,Unit,Applicant',   // becomes a class name below
                 'module_key' => 'required|integer'
             ]);
 
@@ -644,4 +649,13 @@ class ModuleNotesController extends Controller
             ], 500);
         }
     }
+
+    /** Whether the user holds any permission whose name ends with $suffix (e.g. "-add-note"). */
+    private function hasPermissionLike(string $suffix): bool
+    {
+        $user = Auth::user();
+
+        return $user !== null && $user->getAllPermissions()->contains(fn ($p) => str_ends_with($p->name, $suffix));
+    }
+
 }

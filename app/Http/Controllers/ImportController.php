@@ -53,6 +53,14 @@ class ImportController extends Controller
         $this->middleware('permission:applicant-import')->only(['applicantsImport', 'applicantsProcessFile']);
         $this->middleware('permission:sale-import')->only(['salesImport']);
         $this->middleware('permission:administrator-user-import')->only(['usersImport']);
+        // One-off history/data-migration imports that rewrite CRM history. No screen links to
+        // them, and they had no permission check: admins only.
+        $this->middleware('permission:administrator-user-import')->only([
+            'messagesImport', 'applicantNotesImport', 'applicantPivotSaleImport', 'notesRangeForPivotSaleImport',
+            'auditsImport', 'crmNotesImport', 'crmRejectedCvImport', 'cvNotesImport', 'historyImport',
+            'interviewImport', 'ipAddressImport', 'moduleNotesImport', 'qualityNotesImport', 'regionsImport',
+            'revertStageImport', 'saleDocumentsImport', 'saleNotesImport', 'sentEmailDataImport',
+        ]);
     }
 
     public function importIndex()

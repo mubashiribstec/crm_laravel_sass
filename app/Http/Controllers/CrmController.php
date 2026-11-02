@@ -50,6 +50,25 @@ use Illuminate\Support\Facades\Gate;
 
 class CrmController extends Controller
 {
+    /**
+     * Every CRM screen and action needs CRM access (crm-index). Before, the controller had no
+     * permission checks at all, so any logged-in account could move candidates through the
+     * pipeline, including invoice -> paid. Money-path actions also need the permission their
+     * button already checks. Notes history is also reachable from other screens, so it
+     * accepts the notes permissions too.
+     */
+    public function __construct()
+    {
+        $history = ['crmNotesHistoryIndex', 'getApplicantCrmNotesHistoryAjaxRequest', 'getApplicantCrmNotes'];
+        $this->middleware('permission:crm-index')->except($history);
+        $this->middleware('permission:crm-index,crm-view-notes-history,crm-view-note')->only($history);
+        $this->middleware('permission:crm-accept-invoice')
+            ->only(['crmSendInvoiceToInvoiceSent', 'crmInvoiceToDispute', 'crmInvoiceFinalSave']);
+        $this->middleware('permission:crm-accept-invoice-sent')->only(['crmInvoiceSentToPaid', 'crmInvoiceSentToDispute']);
+        $this->middleware('permission:crm-paid-toggle-status')->only(['crmChangePaidStatus', 'crmOpenToPaidApplicants']);
+        $this->middleware('permission:crm-paid-revert')->only(['crmPaidRevertToInvoiceSent']);
+    }
+
     use SendEmails, SendSMS, HidesPrivateContacts;
 
     public function index()
