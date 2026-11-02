@@ -196,7 +196,7 @@ class Directory
                 'job_title' => (string) $a->job_title_name,
                 'flags' => ['callback' => (bool) $a->is_callback_enable, 'no_response' => (bool) $a->is_no_response,
                     'circuit_busy' => (bool) $a->is_circuit_busy],
-                'last_note' => Xplogent::clip($a->notes_details, 300),
+                'last_note' => $this->note($a->notes_details, 300),
                 'last_note_at' => $a->notes_created_at ? Carbon::parse($a->notes_created_at)->toIso8601ZuluString() : null,
                 'last_called_at' => isset($lastCalled[$a->id]) ? Carbon::parse($lastCalled[$a->id])->toIso8601ZuluString() : null,
             ];
@@ -267,9 +267,9 @@ class Directory
             'flags' => ['blocked' => (bool) $a->is_blocked, 'temp_not_interested' => (bool) $a->is_temp_not_interested,
                 'callback' => (bool) $a->is_callback_enable, 'no_response' => (bool) $a->is_no_response,
                 'no_job' => (bool) $a->is_no_job, 'circuit_busy' => (bool) $a->is_circuit_busy],
-            'notes' => Xplogent::clip($latestModule ?? optional($latestNote)->details, 500),
+            'notes' => $this->note($latestModule ?? optional($latestNote)->details, 500),
             'last_outcome' => (string) optional($latestNote)->moved_tab_to,
-            'callback_note' => Xplogent::clip($callbackNote, 300),
+            'callback_note' => $this->note($callbackNote, 300),
             'cv_excerpt' => config('xplogent.share_cv_excerpt') ? $this->cv->excerpt($a) : '',
             'history' => $history,
             'applications' => $applications,
@@ -302,6 +302,19 @@ class Directory
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+    /**
+     * A recruiter's free-text note as Xplogent may see it: contact details, postcodes and
+     * likely dates of birth removed (the same rules as the CV excerpt), then clipped. Notes are
+     * often HTML, so it is decoded first ("jane&#64;x.co.uk" is an email too), and redacted
+     * before the clip, so a number cut in half can't slip through.
+     */
+    private function note(?string $text, int $max): string
+    {
+        $plain = strip_tags(html_entity_decode((string) $text, ENT_QUOTES | ENT_HTML5));
+
+        return Xplogent::clip(CvExcerpt::redact($plain, keepRecentDates: true), $max);
+    }
+
     /** @return array{e164: string, kind: string}|null the first number Xplogent can dial. */
     public function bestPhone($a): ?array
     {

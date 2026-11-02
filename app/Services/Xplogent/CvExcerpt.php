@@ -36,17 +36,25 @@ class CvExcerpt
         });
     }
 
-    /** Remove contact details and anything that looks like a date of birth, then cap. */
-    public static function redact(string $text): string
+    /**
+     * Remove contact details and anything that looks like a date of birth, then cap.
+     *
+     * $keepRecentDates is for recruiter notes: a numeric date from the last 14 years stays
+     * ("callback 12/11/2026"), an older one is likely a date of birth and goes. A date
+     * labelled DOB / date of birth / born always goes.
+     */
+    public static function redact(string $text, bool $keepRecentDates = false): string
     {
         $text = preg_replace('/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i', '[email]', $text);
         // Phone numbers: 10+ digits (keeps work-history years like "2015 - 2019").
         $text = preg_replace_callback('/\+?\d[\d\s().-]{8,}\d/', fn ($m) =>
             strlen(preg_replace('/\D/', '', $m[0])) >= 10 ? '[phone]' : $m[0], $text);
         $text = preg_replace('/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i', '[postcode]', $text);
-        $text = preg_replace('/\b\d{1,2}[\/.-]\d{1,2}[\/.-](?:19|20)\d{2}\b/', '[date]', $text);
-        $text = preg_replace('/\b(?:d\.?o\.?b\.?|date\s+of\s+birth|born)\b[\s:]*(?:\[date\]|[^\n.;,]{0,25})/i',
-            '[date of birth]', $text);
+        $text = preg_replace('/\b(?:d\.?o\.?b\.?|date\s+of\s+birth|born)\b[\s:]*'
+            . '(?:\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}|[^\n.;,]{0,25})/i', '[date of birth]', $text);
+        $oldest = (int) date('Y') - 14;
+        $text = preg_replace_callback('/\b\d{1,2}[\/.-]\d{1,2}[\/.-]((?:19|20)\d{2})\b/', fn ($m) =>
+            $keepRecentDates && (int) $m[1] > $oldest ? $m[0] : '[date]', $text);
         $text = trim(preg_replace('/\s+/', ' ', $text));
 
         return mb_strlen($text) > self::MAX ? rtrim(mb_substr($text, 0, self::MAX - 1)) . '…' : $text;

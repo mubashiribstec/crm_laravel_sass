@@ -5,6 +5,7 @@ namespace Tests\Feature\Xplogent;
 use App\Services\Xplogent\CvExcerpt;
 use Horsefly\ApplicantNote;
 use Horsefly\CallLog;
+use Horsefly\ModuleNote;
 
 class XplogentLookupTest extends XplogentTestCase
 {
@@ -45,6 +46,28 @@ class XplogentLookupTest extends XplogentTestCase
         $this->assertStringContainsString('call me Friday', $c['callback_note']);
         $this->assertSame('', $c['cv_excerpt']);                               // sharing off by default
         $this->assertArrayNotHasKey('applicant_email', $c);
+    }
+
+    /** X-04: free-text notes reach Xplogent without contact details or a date of birth. */
+    public function test_notes_are_redacted_in_the_lookup_and_the_queue(): void
+    {
+        $a = $this->applicant(['applicant_phone' => '07700900123']);
+        $leaky = 'Call her on 07700 900 123 or jane&#64;x.co.uk, DOB 12/03/1985, lives LS7 3AA. '
+            . 'Callback booked 12/11/2026, keen on nights.';
+        ModuleNote::create(['details' => $leaky, 'user_id' => $this->ai->id, 'module_noteable_id' => $a->id,
+            'module_noteable_type' => 'Horsefly\Applicant', 'status' => 1]);
+        ApplicantNote::create(['applicant_id' => $a->id, 'user_id' => $this->ai->id, 'details' => $leaky,
+            'moved_tab_to' => 'callback']);
+
+        $c = $this->signed('/api/xplogent/contact-lookup', ['phone' => '+447700900123'])->assertOk()->json('contact');
+        $queued = $this->signed('/api/xplogent/campaigns/queue', ['sale_id' => $this->sale()->id])
+            ->assertOk()->json('candidates.0.last_note');
+        foreach (['notes' => $c['notes'], 'callback_note' => $c['callback_note'], 'last_note' => $queued] as $field => $text) {
+            foreach (['900 123', '900123', 'jane', 'x.co.uk', '1985', 'LS7 3AA'] as $leak) {
+                $this->assertStringNotContainsString($leak, $text, "$field leaks $leak");
+            }
+            $this->assertStringContainsString('Callback booked 12/11/2026, keen on nights', $text, $field);
+        }
     }
 
     public function test_cv_excerpt_is_redacted_and_capped_when_enabled(): void
