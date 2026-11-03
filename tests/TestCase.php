@@ -6,10 +6,5 @@ use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 
 abstract class TestCase extends BaseTestCase
 {
-      public function test_homepage_loads_successfully(): void
-    {
-        $response = $this->get('/');
-
-        $response->assertStatus(200);
-    }
+    // No test methods here: every test class inherits from this one.
 }

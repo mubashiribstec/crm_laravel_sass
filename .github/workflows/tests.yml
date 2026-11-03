@@ -49,7 +49,7 @@ jobs:
       - run: cp .env.example .env && php artisan key:generate
       # A fresh install must migrate, and seeding must be safe to repeat.
       - run: php artisan migrate:fresh --seed --force && php artisan db:seed --force
-      - run: php artisan test --testsuite=Feature --filter='Xplogent|Security'
+      - run: php artisan test        # the whole suite (Unit + Feature)
 
   # Scans the commits a pull request adds. Older history still holds credentials that
   # were removed from the tree (rotate them; rewriting history is a separate decision),
