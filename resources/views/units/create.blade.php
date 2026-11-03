@@ -175,6 +175,47 @@
 
                                 </div>
                             </div>
+                            <div class="col-lg-12">
+                                <div class="mb-3">
+                                    <label for="unitAttachmentDropzone" class="form-label">Attachments</label>
+                                    <div id="unitAttachmentDropzone" class="dropzone dz-clickable attachment-dropzone">
+                                        <div class="dz-message needsclick">
+                                            <i class="h1 ri-upload-cloud-2-line"></i>
+                                            <h3>Drop files here or click to upload.</h3>
+                                            <span class="text-muted fs-13">You can attach multiple files (up to 10 MB each).</span>
+                                        </div>
+                                    </div>
+                                    <ul class="list-unstyled mb-0" id="unitAttachmentPreview"></ul>
+                                    <div id="dz-preview-template" style="display:none;">
+                                        <li class="mt-2 dz-preview dz-file-preview">
+                                            <div class="border rounded">
+                                                <div class="d-flex p-2">
+                                                    <div class="flex-shrink-0 me-3">
+                                                        <div class="avatar-sm bg-light rounded d-flex align-items-center justify-content-center">
+                                                            <div data-dz-thumbnail class="dz-iconify">
+                                                                <iconify-icon icon="solar:file-bold" class="fs-32 text-secondary"></iconify-icon>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="flex-grow-1">
+                                                        <div class="pt-1">
+                                                            <h5 class="fs-14 mb-1" data-dz-name></h5>
+                                                            <p class="fs-13 text-muted mb-0" data-dz-size></p>
+                                                            <strong class="error text-danger" data-dz-errormessage></strong>
+                                                        </div>
+                                                    </div>
+                                                    <div class="flex-shrink-0 ms-3">
+                                                        <button data-dz-remove class="btn btn-sm btn-transparent text-danger" title="Remove file">
+                                                            <iconify-icon icon="solar:trash-bin-minimalistic-bold" class="text-danger fs-24"></iconify-icon>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </li>
+                                    </div>
+                                    <div class="invalid-feedback"></div>
+                                </div>
+                            </div>
                         </div>
                         <div class="mb-3 rounded">
                             <div class="row justify-content-end g-2">
@@ -265,6 +306,9 @@
 
             function resolveFormInput(formEl, field) {
                 // Laravel array rules come back as contact_name.0, contact_email.1, etc.
+                if (/^attachments\.\d+$/.test(field) || field === 'attachments') {
+                    return formEl.querySelector('#unitAttachmentDropzone');
+                }
                 const arrayMatch = field.match(/^(.+)\.(\d+)$/);
                 if (arrayMatch) {
                     const inputs = formEl.querySelectorAll(`[name="${arrayMatch[1]}[]"]`);
@@ -334,6 +378,8 @@
                     '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...';
 
                 const formData = new FormData(form);
+                document.querySelector('#unitAttachmentDropzone')?.dropzone?.getAcceptedFiles()
+                    .forEach(file => formData.append('attachments[]', file));
 
                 fetch(form.action, {
                         method: 'POST',

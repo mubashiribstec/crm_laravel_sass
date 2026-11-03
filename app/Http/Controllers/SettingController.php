@@ -48,6 +48,7 @@ class SettingController extends Controller
             'saveScraperSettings',
             'runScraperActor',
             'deleteScraperActor',
+            'saveVersion',
         ]);
         $this->middleware('permission:administrator-job-category-index')->only(['jobCategoriesIndex', 'getJobCategories']);
         $this->middleware('permission:administrator-job-category-create')->only(['jobCategoriesStore']);
@@ -72,7 +73,19 @@ class SettingController extends Controller
      */
     public function index()
     {
-        return view('settings.list');
+        $appVersion = Setting::where('key', 'app_version')->value('value');
+        $versionHistory = DB::table('application_version_history')
+            ->leftJoin('users', 'users.id', '=', 'application_version_history.updated_by')
+            ->select(
+                'application_version_history.version',
+                'application_version_history.reason',
+                'application_version_history.created_at',
+                'users.name as updated_by'
+            )
+            ->orderByDesc('application_version_history.id')
+            ->get();
+
+        return view('settings.list', compact('appVersion', 'versionHistory'));
     }
     public function emailTemplatesIndex()
     {
@@ -1317,6 +1330,52 @@ class SettingController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+    public function saveVersion(Request $request)
+    {
+        $validated = $request->validate([
+            'version' => 'required|string|max:50',
+            'reason' => 'required|string|max:1000',
+        ]);
+
+        $change = DB::transaction(function () use ($validated) {
+            $setting = Setting::where('key', 'app_version')->lockForUpdate()->firstOrFail();
+
+            if ($setting->value === $validated['version']) {
+                return null;
+            }
+
+            $setting->value = $validated['version'];
+            $setting->save();
+
+            DB::table('application_version_history')->insert([
+                'version' => $validated['version'],
+                'reason' => $validated['reason'],
+                'updated_by' => Auth::id(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            return [
+                'version' => $validated['version'],
+                'reason' => $validated['reason'],
+                'updated_by' => Auth::user()->name,
+                'created_at' => now()->format('d M Y, h:i A'),
+            ];
+        });
+
+        if ($change === null) {
+            return response()->json([
+                'success' => false,
+                'message' => 'The entered version is already current.',
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Application version updated successfully.',
+            'change' => $change,
+        ]);
     }
     public function saveGoogleSettings(Request $request)
     {

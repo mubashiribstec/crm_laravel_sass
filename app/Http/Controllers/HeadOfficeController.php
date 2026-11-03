@@ -27,6 +27,8 @@ use Illuminate\Support\Facades\Gate;
 use App\Observers\ActionObserver;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 
 class HeadOfficeController extends Controller
 {
@@ -36,7 +38,7 @@ class HeadOfficeController extends Controller
     {
         $this->middleware('permission:office-index')->only(['index', 'getHeadOffices', 'getHeadOfficesOld']);
         $this->middleware('permission:office-create')->only(['create', 'store']);
-        $this->middleware('permission:office-edit')->only(['edit', 'update']);
+        $this->middleware('permission:office-edit')->only(['edit', 'update', 'destroyDocument', 'restoreDocument']);
         $this->middleware('permission:office-blacklist')->only(['toggleBlacklist']);
         $this->middleware('permission:office-view')->only(['show', 'officeDetails', 'getModuleContacts']);
         $this->middleware('permission:office-delete')->only(['destroy']);
@@ -109,6 +111,8 @@ class HeadOfficeController extends Controller
 
             'contact_note' => 'nullable|array',
             'contact_note.*' => 'nullable|string',
+            'attachments' => 'nullable|array',
+            'attachments.*' => 'file|max:10240',
         ]);
 
         if ($validator->fails()) {
@@ -119,6 +123,7 @@ class HeadOfficeController extends Controller
             ], 422);
         }
 
+        $storedDocumentPaths = [];
         DB::beginTransaction();
 
         try {
@@ -204,6 +209,8 @@ class HeadOfficeController extends Controller
                 'module_note_uid' => md5($moduleNote->id)
             ]);
 
+            $this->storeOfficeDocuments($request, $office, $storedDocumentPaths);
+
             DB::commit();
             return response()->json([
                 'success' => true,
@@ -213,6 +220,7 @@ class HeadOfficeController extends Controller
         } catch (\Exception $e) {
             Log::error('Error creating head office: ' . $e->getMessage());
             DB::rollBack();
+            File::delete(array_map('public_path', $storedDocumentPaths));
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while creating the head office. Please try again.'
@@ -556,15 +564,22 @@ class HeadOfficeController extends Controller
                     if (Gate::allows('office-edit')) {
                         $html .= '<li><a class="dropdown-item" href="' . route('head-offices.edit', ['id' => $office->id]) . '">Edit</a></li>';
                     }
-
                     if (Gate::allows('office-blacklist')) {
                         $blockLabel = $office->is_blacklist ? 'Remove from Blacklist' : 'Add to Blacklist';
                         $blockStatus = $office->is_blacklist ? 0 : 1;
                         $html .= '<li><a class="dropdown-item ' . ($office->is_blacklist ? 'text-success' : 'text-danger') . '" href="javascript:void(0);" onclick="toggleOfficeBlacklist(' . (int)$office->id . ', ' . $blockStatus . ')">' . $blockLabel . '</a></li>';
                     }
 
-                    if (Gate::allows('office-view-notes-history') || Gate::allows('office-view-manager-details')) {
+                    if (
+                        Gate::allows('office-view')
+                        || Gate::allows('office-edit')
+                        || Gate::allows('office-view-notes-history')
+                        || Gate::allows('office-view-manager-details')
+                    ) {
                         $html .= '<li><hr class="dropdown-divider"></li>';
+                    }
+                    if (Gate::allows('office-view') || Gate::allows('office-edit')) {
+                        $html .= '<li><a class="dropdown-item" href="javascript:void(0);" onclick="showOfficeDocuments(' . (int) $office->id . ')">Attachments</a></li>';
                     }
                     if (Gate::allows('office-view-notes-history')) {
                         $html .= '<li><a class="dropdown-item" href="javascript:void(0);" onclick="viewNotesHistory(' . $office->id . ')">Notes History</a></li>';
@@ -734,7 +749,10 @@ class HeadOfficeController extends Controller
 
         $redirect_url = $request->input('redirect_url', 'head-offices.list');
 
-        return view('head-offices.edit', compact('office', 'contacts', 'redirect_url'));
+        $office->load('documents');
+        $deletedDocuments = $office->documents()->onlyTrashed()->orderByDesc('deleted_at')->get();
+
+        return view('head-offices.edit', compact('office', 'contacts', 'redirect_url', 'deletedDocuments'));
     }
     public function update(Request $request)
     {
@@ -760,6 +778,8 @@ class HeadOfficeController extends Controller
 
             'contact_note' => 'nullable|array',
             'contact_note.*' => 'nullable|string',
+            'attachments' => 'nullable|array',
+            'attachments.*' => 'file|max:10240',
         ]);
 
         if ($validator->fails()) {
@@ -770,6 +790,7 @@ class HeadOfficeController extends Controller
             ], 422);
         }
 
+        $storedDocumentPaths = [];
         DB::beginTransaction();
         try {
             // Get office data
@@ -873,6 +894,8 @@ class HeadOfficeController extends Controller
                 $office->contact()->create($contactData);
             }
 
+            $this->storeOfficeDocuments($request, $office, $storedDocumentPaths);
+
             DB::commit();
             return response()->json([
                 'success' => true,
@@ -882,6 +905,7 @@ class HeadOfficeController extends Controller
         } catch (\Exception $e) {
             Log::error('Error updating head office: ' . $e->getMessage());
             DB::rollBack();
+            File::delete(array_map('public_path', $storedDocumentPaths));
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while updating the head office. Please try again.'
@@ -898,6 +922,114 @@ class HeadOfficeController extends Controller
     {
         $office = Office::findOrFail($id);
         return view('head-offices.show', compact('office'));
+    }
+
+    public function documents($id)
+    {
+        abort_unless(Gate::any(['office-view', 'office-edit']), 403);
+
+        $office = Office::findOrFail($id);
+
+        return response()->json([
+            'documents' => $office->documents()->orderBy('id')->get()->map(function ($document) use ($office) {
+                return [
+                    'name' => $document->document_name,
+                    'size' => $document->document_size,
+                    'mime_type' => File::exists(public_path($document->document_path))
+                        ? mime_content_type(public_path($document->document_path))
+                        : null,
+                    'url' => route('head-offices.documents.show', [
+                        'id' => $office->id,
+                        'documentId' => $document->id,
+                    ]),
+                ];
+            }),
+        ]);
+    }
+
+    public function showDocument($id, $documentId)
+    {
+        abort_unless(Gate::any(['office-view', 'office-edit']), 403);
+
+        $document = Office::findOrFail($id)->documents()->withTrashed()->findOrFail($documentId);
+        $path = public_path($document->document_path);
+
+        abort_unless(File::exists($path), 404);
+
+        $mimeType = mime_content_type($path) ?: 'application/octet-stream';
+        if (in_array($mimeType, ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'], true)) {
+            return response()->file($path, [
+                'Content-Type' => $mimeType,
+                'X-Content-Type-Options' => 'nosniff',
+            ])->setContentDisposition('inline', $document->document_name);
+        }
+
+        return response()->download($path, $document->document_name, [
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    public function destroyDocument(Request $request, $id, $documentId)
+    {
+        $validated = $request->validate([
+            'reason' => 'required|string|min:3|max:2000',
+        ]);
+
+        $document = Office::findOrFail($id)->documents()->findOrFail($documentId);
+        DB::transaction(function () use ($document, $validated) {
+            $document->delete_reason = trim($validated['reason']);
+            $document->deleted_by = Auth::id();
+            $document->save();
+            $document->delete();
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Attachment removed successfully.',
+            'deleted_at' => $document->deleted_at?->format('d M Y, h:i A'),
+        ]);
+    }
+
+    public function restoreDocument($id, $documentId)
+    {
+        $document = Office::findOrFail($id)->documents()->onlyTrashed()->findOrFail($documentId);
+        abort_unless(File::exists(public_path($document->document_path)), 410, 'The attachment file has already been permanently deleted.');
+
+        DB::transaction(function () use ($document) {
+            $document->delete_reason = null;
+            $document->deleted_by = null;
+            $document->save();
+            $document->restore();
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Attachment restored successfully.',
+        ]);
+    }
+
+    private function storeOfficeDocuments(Request $request, Office $office, array &$storedPaths): void
+    {
+        foreach ($request->file('attachments', []) as $attachment) {
+            $originalName = $attachment->getClientOriginalName();
+            $size = $attachment->getSize();
+            $extension = $attachment->guessExtension();
+            $filename = Str::uuid() . ($extension ? '.' . $extension : '');
+            $dateFolder = Carbon::now()->format('Y/m/d');
+            $directory = public_path('uploads/docs/' . $dateFolder);
+            File::ensureDirectoryExists($directory, 0755, true);
+            $attachment->move($directory, $filename);
+            $path = 'uploads/docs/' . $dateFolder . '/' . $filename;
+
+            $storedPaths[] = $path;
+            $office->documents()->create([
+                'user_id' => Auth::id(),
+                'document_name' => $originalName,
+                'document_path' => $path,
+                'document_size' => $size,
+                'document_extension' => $extension,
+            ]);
+        }
     }
     public function getModuleContacts(Request $request)
     {

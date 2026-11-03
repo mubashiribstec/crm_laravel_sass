@@ -28,7 +28,7 @@ use Illuminate\Support\Facades\Log;
                 ->onFailure(function () {
                     Log::error('SendSms command failed.');
                 });
-    
+
     Schedule::command('app:update-available-job-status')
                 ->dailyAt('22:00')
                 ->withoutOverlapping()
@@ -38,3 +38,7 @@ use Illuminate\Support\Facades\Log;
                 ->onFailure(function () {
                     Log::error('Update to the job availability command failed.');
                 });
+
+    Schedule::command('attachments:purge-deleted')
+                ->hourly()
+                ->withoutOverlapping();

@@ -41,4 +41,28 @@ class Message extends Model
     {
        return Carbon::parse($this->time)->format('h:i A');// Format the time as "11:10 AM"
     }
+
+    /**
+     * Which of these applicants have an unread incoming SMS (same rule as the topbar's unread messages;
+     * opening the applicant's chat marks them read).
+     *
+     * @return array<int, true> applicant id => true
+     */
+    public static function applicantIdsWithUnread(iterable $applicantIds): array
+    {
+        $ids = collect($applicantIds)->map(fn ($id) => (int) $id)->filter()->unique()->values();
+        if ($ids->isEmpty()) {
+            return [];
+        }
+
+        return static::query()
+            ->whereIn('module_id', $ids)
+            ->where('module_type', 'Horsefly\\Applicant')
+            ->where('status', 'incoming')
+            ->where('is_read', 0)
+            ->distinct()
+            ->pluck('module_id')
+            ->mapWithKeys(fn ($id) => [(int) $id => true])
+            ->all();
+    }
 }

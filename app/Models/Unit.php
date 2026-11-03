@@ -74,6 +74,10 @@ class Unit extends Model
     {
         return $this->belongsTo(Office::class, 'office_id');
     }
+    public function documents()
+    {
+        return $this->hasMany(UnitDocument::class, 'unit_id');
+    }
     public function user()
     {
         return $this->belongsTo(User::class, 'user_id');

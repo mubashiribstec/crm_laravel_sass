@@ -28,6 +28,8 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 use App\Observers\ActionObserver;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 
 class UnitController extends Controller
 {
@@ -37,7 +39,7 @@ class UnitController extends Controller
     {
         $this->middleware('permission:unit-index')->only(['index', 'getUnits']);
         $this->middleware('permission:unit-create')->only(['create', 'store']);
-        $this->middleware('permission:unit-edit')->only(['edit', 'update']);
+        $this->middleware('permission:unit-edit')->only(['edit', 'update', 'destroyDocument', 'restoreDocument']);
         $this->middleware('permission:unit-blacklist')->only(['toggleBlacklist']);
         $this->middleware('permission:unit-view')->only(['show', 'unitDetails']);
         $this->middleware('permission:unit-delete')->only(['destroy']);
@@ -112,6 +114,8 @@ class UnitController extends Controller
 
             'contact_job_source_id' => 'required|array',
             'contact_job_source_id.*' => 'required|exists:job_sources,id',
+            'attachments' => 'nullable|array',
+            'attachments.*' => 'file|max:10240',
         ]);
 
         if ($validator->fails()) {
@@ -122,6 +126,7 @@ class UnitController extends Controller
             ], 422);
         }
 
+        $storedDocumentPaths = [];
         DB::beginTransaction();
 
         try {
@@ -213,6 +218,8 @@ class UnitController extends Controller
                 'module_note_uid' => md5($moduleNote->id)
             ]);
 
+            $this->storeUnitDocuments($request, $unit, $storedDocumentPaths);
+
             DB::commit();
 
             return response()->json([
@@ -224,6 +231,7 @@ class UnitController extends Controller
             Log::error('Error creating unit: ' . $e->getMessage());
 
             DB::rollBack();
+            File::delete(array_map('public_path', $storedDocumentPaths));
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage()
@@ -232,7 +240,7 @@ class UnitController extends Controller
     }
     public function getUnits(Request $request)
     {
-        $statusFilter = $request->input('status_filter', 'active');
+        $statusFilter = $request->input('status_filter', '');
         $officeFilter = $request->input('office_filter', ''); // Default is empty (no filter)
 
         $query = Unit::query()
@@ -407,16 +415,16 @@ class UnitController extends Controller
                         </button>
                         <ul class="dropdown-menu">';
 
-                if (Gate::allows('unit-edit')) {
-                    $html .= '<li><a class="dropdown-item" href="' . route('units.edit', ['id' => $u->id]) . '">Edit</a></li>';
-                }
                 if (Gate::allows('unit-view')) {
-                    $html .= '<li><a class="dropdown-item"href="javascript:void(0);" onclick="showDetailsModal('
+                    $html .= '<li><a class="dropdown-item" href="javascript:void(0);" onclick="showDetailsModal('
                         . (int)$u->id . ', '
                         . '\'' . e($office_name) . '\', '
                         . '\'' . e($u->unit_name) . '\', '
                         . '\'' . e($postcode) . '\', '
                         . '\'' . e($status) . '\')">View</a></li>';
+                }
+                if (Gate::allows('unit-edit')) {
+                    $html .= '<li><a class="dropdown-item" href="' . route('units.edit', ['id' => $u->id]) . '">Edit</a></li>';
                 }
                 if (Gate::allows('unit-blacklist')) {
                     $blockLabel = $u->is_blacklist ? 'Remove from Blacklist' : 'Add to Blacklist';
@@ -432,8 +440,17 @@ class UnitController extends Controller
                         : '<li><a class="dropdown-item text-warning" href="javascript:void(0);" onclick="markUnitDisabledModal(' . (int)$u->id . ', 0)">Mark Disabled</a></li>';
                 }
 
-                if (Gate::allows('unit-view-notes-history') || Gate::allows('unit-view-manager-details')) {
+                if (
+                    Gate::allows('unit-view')
+                    || Gate::allows('unit-edit')
+                    || Gate::allows('unit-view-notes-history')
+                    || Gate::allows('unit-view-manager-details')
+                ) {
                     $html .= '<li><hr class="dropdown-divider"></li>';
+                }
+
+                if (Gate::allows('unit-view') || Gate::allows('unit-edit')) {
+                    $html .= '<li><a class="dropdown-item" href="javascript:void(0);" onclick="showUnitDocuments(' . (int) $u->id . ')">Attachments</a></li>';
                 }
 
                 if (Gate::allows('unit-view-notes-history')) {
@@ -657,7 +674,10 @@ class UnitController extends Controller
 
         $redirect_url = $request->input('redirect_url', 'units.list');
 
-        return view('units.edit', compact('offices', 'unit', 'contacts', 'redirect_url', 'jobSources'));
+        $unit->load('documents');
+        $deletedDocuments = $unit->documents()->onlyTrashed()->orderByDesc('deleted_at')->get();
+
+        return view('units.edit', compact('offices', 'unit', 'contacts', 'redirect_url', 'jobSources', 'deletedDocuments'));
     }
     public function update(Request $request)
     {
@@ -686,6 +706,8 @@ class UnitController extends Controller
 
             'contact_job_source_id' => 'required|array',
             'contact_job_source_id.*' => 'required|exists:job_sources,id',
+            'attachments' => 'nullable|array',
+            'attachments.*' => 'file|max:10240',
         ]);
 
         // A unit may keep its current (blacklisted) office, but cannot be moved under a blacklisted one.
@@ -707,6 +729,7 @@ class UnitController extends Controller
             ], 422);
         }
 
+        $storedDocumentPaths = [];
         DB::beginTransaction();
         try {
             // Get office data
@@ -815,6 +838,8 @@ class UnitController extends Controller
                 $unit->contacts()->create($contactData);
             }
 
+            $this->storeUnitDocuments($request, $unit, $storedDocumentPaths);
+
             DB::commit();
             return response()->json([
                 'success' => true,
@@ -824,6 +849,7 @@ class UnitController extends Controller
         } catch (\Exception $e) {
             Log::error('Error updating unit: ' . $e->getMessage());
             DB::rollBack();
+            File::delete(array_map('public_path', $storedDocumentPaths));
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while updating the unit. Please try again.'
@@ -840,6 +866,114 @@ class UnitController extends Controller
     {
         $unit = Unit::findOrFail($id);
         return view('units.show', compact('unit'));
+    }
+
+    public function documents($id)
+    {
+        abort_unless(Gate::any(['unit-view', 'unit-edit']), 403);
+
+        $unit = Unit::findOrFail($id);
+
+        return response()->json([
+            'documents' => $unit->documents()->orderBy('id')->get()->map(function ($document) use ($unit) {
+                return [
+                    'name' => $document->document_name,
+                    'size' => $document->document_size,
+                    'mime_type' => File::exists(public_path($document->document_path))
+                        ? mime_content_type(public_path($document->document_path))
+                        : null,
+                    'url' => route('units.documents.show', [
+                        'id' => $unit->id,
+                        'documentId' => $document->id,
+                    ]),
+                ];
+            }),
+        ]);
+    }
+
+    public function showDocument($id, $documentId)
+    {
+        abort_unless(Gate::any(['unit-view', 'unit-edit']), 403);
+
+        $document = Unit::findOrFail($id)->documents()->withTrashed()->findOrFail($documentId);
+        $path = public_path($document->document_path);
+
+        abort_unless(File::exists($path), 404);
+
+        $mimeType = mime_content_type($path) ?: 'application/octet-stream';
+        if (in_array($mimeType, ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'], true)) {
+            return response()->file($path, [
+                'Content-Type' => $mimeType,
+                'X-Content-Type-Options' => 'nosniff',
+            ])->setContentDisposition('inline', $document->document_name);
+        }
+
+        return response()->download($path, $document->document_name, [
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    public function destroyDocument(Request $request, $id, $documentId)
+    {
+        $validated = $request->validate([
+            'reason' => 'required|string|min:3|max:2000',
+        ]);
+
+        $document = Unit::findOrFail($id)->documents()->findOrFail($documentId);
+        DB::transaction(function () use ($document, $validated) {
+            $document->delete_reason = trim($validated['reason']);
+            $document->deleted_by = Auth::id();
+            $document->save();
+            $document->delete();
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Attachment removed successfully.',
+            'deleted_at' => $document->deleted_at?->format('d M Y, h:i A'),
+        ]);
+    }
+
+    public function restoreDocument($id, $documentId)
+    {
+        $document = Unit::findOrFail($id)->documents()->onlyTrashed()->findOrFail($documentId);
+        abort_unless(File::exists(public_path($document->document_path)), 410, 'The attachment file has already been permanently deleted.');
+
+        DB::transaction(function () use ($document) {
+            $document->delete_reason = null;
+            $document->deleted_by = null;
+            $document->save();
+            $document->restore();
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Attachment restored successfully.',
+        ]);
+    }
+
+    private function storeUnitDocuments(Request $request, Unit $unit, array &$storedPaths): void
+    {
+        foreach ($request->file('attachments', []) as $attachment) {
+            $originalName = $attachment->getClientOriginalName();
+            $size = $attachment->getSize();
+            $extension = $attachment->guessExtension();
+            $filename = Str::uuid() . ($extension ? '.' . $extension : '');
+            $dateFolder = Carbon::now()->format('Y/m/d');
+            $directory = public_path('uploads/docs/' . $dateFolder);
+            File::ensureDirectoryExists($directory, 0755, true);
+            $attachment->move($directory, $filename);
+            $path = 'uploads/docs/' . $dateFolder . '/' . $filename;
+
+            $storedPaths[] = $path;
+            $unit->documents()->create([
+                'user_id' => Auth::id(),
+                'document_name' => $originalName,
+                'document_path' => $path,
+                'document_size' => $size,
+                'document_extension' => $extension,
+            ]);
+        }
     }
     public function export(Request $request)
     {

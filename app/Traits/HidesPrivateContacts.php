@@ -264,6 +264,10 @@ trait HidesPrivateContacts
      */
     protected function privateDataContext(): ?array
     {
+        if ($this->privateDataContextCache !== false) {
+            return $this->privateDataContextCache;
+        }
+
         if (Gate::allows('show-private-data')) {
             return $this->privateDataContextCache = null;
         }

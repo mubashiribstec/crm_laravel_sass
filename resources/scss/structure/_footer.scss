@@ -15,6 +15,12 @@
     border-top: $card-border-width solid $card-border-color;
 }
 
+.footer-content {
+    width: 100%;
+    text-align: center;
+    white-space: nowrap;
+}
+
 .footer-text {
     background: linear-gradient(to right, $primary 10%, $warning 50%, $success 60%);
     background-size: auto auto;

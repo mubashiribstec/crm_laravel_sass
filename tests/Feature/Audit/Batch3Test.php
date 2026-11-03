@@ -382,7 +382,8 @@ class Batch3Test extends XplogentTestCase
         // And no CRM action is left on crm-index alone, apart from those three.
         $open = ['index', 'getCrmApplicantsAjaxRequest', 'crmNotesHistoryIndex', 'getApplicantCrmNotesHistoryAjaxRequest',
             'getApplicantCrmNotes', 'crmRequestNoResponse', 'crmRequestNoResponseToConfirmedRequest',
-            'crmRequestNoResponseToReject'];
+            'crmRequestNoResponseToReject',
+            'getCrmUnreadMessageApplicants'];   // read-only: which listed rows have an unread SMS
         foreach (app('router')->getRoutes() as $route) {
             if (($route->getAction('controller') ?? '') === '' || !str_starts_with($route->getAction('controller'),
                     \App\Http\Controllers\CrmController::class . '@')) {
@@ -401,9 +402,12 @@ class Batch3Test extends XplogentTestCase
     // ── N-08: the Open CVs "Send request" item ───────────────────────────────
     public function test_every_crm_menu_item_calls_a_function_the_page_defines(): void
     {
-        $controller = file_get_contents(app_path('Http/Controllers/CrmController.php'));
-        $controller = preg_replace('#^\s*//.*$#m', '', $controller);               // not commented-out code
-        preg_match_all('/onclick="((?:crm|updateCrm)\w*)\(/', $controller, $called);
+        // The menus are built in the controller and in app/Services/Crm (CrmActionMenu, CrmActionModals, ...).
+        $source = implode("\n", array_map('file_get_contents',
+            array_merge([app_path('Http/Controllers/CrmController.php')], glob(app_path('Services/Crm/*.php')))));
+        $source = preg_replace('#^\s*//.*$#m', '', $source);                       // not commented-out code
+        preg_match_all('/onclick="((?:crm|updateCrm)\w*)\(/', $source, $called);
+        $this->assertGreaterThan(40, count(array_unique($called[1])));             // the menus were found
         preg_match_all('/function\s+(\w+)\s*\(/', file_get_contents(resource_path('views/crm/list.blade.php')), $defined);
         $this->assertSame([], array_values(array_diff(array_unique($called[1]), $defined[1])));
     }
@@ -426,5 +430,32 @@ class Batch3Test extends XplogentTestCase
         $this->assertStringContainsString("crmSentCvToRequestModal(this, {$a->id}, {$sale->id}, 'open_cv')", $html);
         $this->assertStringContainsString('id="crmSentCvToRequestModal' . $a->id . '-' . $sale->id . '"', $html);
         $this->assertStringNotContainsString('crmSendRequestModal(', $html);
+    }
+
+    public function test_every_crm_button_has_its_dialog_rendered_on_that_tab(): void
+    {
+        // CrmActionModals renders only each tab's own dialogs (TAB_MODALS); a button whose dialog is
+        // missing there opens nothing. Pair each tab's button method with its dialogs.
+        $menu = file_get_contents(app_path('Services/Crm/CrmActionMenu.php'));
+        preg_match_all("/'([^']+)' => \\\$this->(\\w+Buttons)\\(/", $menu, $m, PREG_SET_ORDER);
+        preg_match("/default => \\\$this->(\\w+Buttons)\\(/", $menu, $default);
+        $tabs = array_column($m, 1, 2) + [$default[1] => 'sent cvs'];
+        $dialogs = array_map(fn ($method) => $method->name,
+            (new \ReflectionClass(\App\Services\Crm\CrmActionModals::class))->getMethods());
+        $checked = 0;
+        foreach ($tabs as $method => $tab) {
+            $body = (new \ReflectionMethod(\App\Services\Crm\CrmActionMenu::class, $method));
+            $code = implode('', array_slice(file($body->getFileName()), $body->getStartLine() - 1,
+                $body->getEndLine() - $body->getStartLine() + 1));
+            preg_match_all('/onclick="(\w+)\(/', $code, $calls);
+            foreach (array_unique($calls[1]) as $fn) {
+                if (in_array($fn, $dialogs, true)) {                         // a server-rendered dialog
+                    $this->assertContains($fn, \App\Services\Crm\CrmActionModals::TAB_MODALS[$tab] ?? [],
+                        "tab '$tab': $fn's dialog is not rendered");
+                    $checked++;
+                }
+            }
+        }
+        $this->assertGreaterThan(40, $checked);
     }
 }

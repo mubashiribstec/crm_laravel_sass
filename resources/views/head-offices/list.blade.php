@@ -46,9 +46,10 @@
                                     <div class="dropdown d-inline">
                                         <button class="btn btn-outline-primary me-1 my-1 dropdown-toggle" type="button"
                                             id="dropdownMenuButton1" data-bs-toggle="dropdown" aria-expanded="false">
-                                            <i class="ri-filter-line me-1"></i> <span id="showFilterStatus">Active</span>
+                                            <i class="ri-filter-line me-1"></i> <span id="showFilterStatus">All</span>
                                         </button>
                                         <div class="dropdown-menu" aria-labelledby="dropdownMenuButton1">
+                                            <a class="dropdown-item status-filter" href="#">All</a>
                                             <a class="dropdown-item status-filter" href="#">Active</a>
                                             <a class="dropdown-item status-filter" href="#">Inactive</a>
                                             <a class="dropdown-item status-filter" href="#">Blacklisted</a>
@@ -194,6 +195,19 @@
         </div>
     </div>
 
+    <div class="modal fade" id="officeDocumentsModal" tabindex="-1" aria-labelledby="officeDocumentsModalLabel"
+        aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="officeDocumentsModalLabel">Office Attachments</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body"></div>
+            </div>
+        </div>
+    </div>
+
 @section('script')
     <!-- jQuery CDN (make sure this is loaded before DataTables) -->
     <script src="{{ asset('js/jquery-3.6.0.min.js') }}"></script>
@@ -223,7 +237,7 @@
     <script src="{{ asset('js/summernote-lite.min.js') }}"></script>
 
     <script>
-        var currentFilter = 'active';
+        var currentFilter = '';
         var pendingOfficeBlacklist = null;
 
         $(document).ready(function() {
@@ -469,15 +483,18 @@
 
             /*** Status filter dropdown handler ***/
             $('.status-filter').on('click', function() {
-                currentFilter = $(this).text().toLowerCase();
+                currentFilter = $(this).text().trim().toLowerCase() === 'all'
+                    ? ''
+                    : $(this).text().trim().toLowerCase();
 
                 // Capitalize each word
-                const formattedText = currentFilter
+                const formattedText = currentFilter || 'all';
+                const displayText = formattedText
                     .split(' ')
                     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                     .join(' ');
 
-                $('#showFilterStatus').html(formattedText);
+                $('#showFilterStatus').text(displayText);
                 table.ajax.reload(); // Reload with updated status filter
             });
 
@@ -734,6 +751,77 @@
                     }
                 });
             });
+        }
+
+        function showOfficeDocuments(officeId) {
+            const modal = $('#officeDocumentsModal');
+            const body = modal.find('.modal-body').empty();
+            body.html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></div>');
+            modal.modal('show');
+
+            const documentsUrl = @json(url('head-offices'));
+            fetch(`${documentsUrl}/${encodeURIComponent(officeId)}/documents`, {
+                headers: { 'Accept': 'application/json' }
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Unable to load office attachments.');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    body.empty();
+                    if (!data.documents.length) {
+                        body.text('No attachments saved.');
+                        return;
+                    }
+
+                    const grid = $('<div class="row g-3"></div>');
+                    data.documents.forEach(document => {
+                        const column = $('<div class="col-6 col-md-4 col-lg-3"></div>');
+                        const card = $('<div class="card h-100"></div>');
+                        const preview = $('<a class="d-flex align-items-center justify-content-center bg-light border-bottom overflow-hidden"></a>')
+                            .attr('href', document.url)
+                            .attr('target', '_blank')
+                            .attr('rel', 'noopener')
+                            .css({ height: '150px', color: 'inherit' });
+
+                        if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(document.mime_type)) {
+                            preview.append($('<img class="w-100 h-100">')
+                                .attr('src', document.url)
+                                .attr('alt', document.name)
+                                .css({ objectFit: 'contain' }));
+                        } else if (document.mime_type === 'application/pdf') {
+                            preview.append($('<iframe title="PDF preview" loading="lazy" class="w-100 h-100"></iframe>')
+                                .attr('src', document.url)
+                                .attr('tabindex', '-1')
+                                .css({ border: 0, pointerEvents: 'none' }));
+                        } else {
+                            const extension = (document.name.split('.').pop() || 'file').toUpperCase();
+                            preview.append($('<div class="text-center"></div>')
+                                .append($('<iconify-icon icon="solar:document-text-bold-duotone" class="text-primary"></iconify-icon>')
+                                    .css({ fontSize: '56px' }))
+                                .append($('<div class="small text-muted"></div>').text(extension)));
+                        }
+
+                        const details = $('<div class="card-body p-2"></div>');
+                        details.append($('<div class="small text-truncate" title=""></div>')
+                            .attr('title', document.name)
+                            .text(document.name));
+                        if (document.size) {
+                            details.append($('<div class="small text-muted"></div>')
+                                .text(`${(document.size / 1024).toFixed(1)} KB`));
+                        }
+                        card.append(preview, details);
+                        column.append(card);
+                        grid.append(column);
+                    });
+                    body.append(grid);
+                })
+                .catch(error => {
+                    console.error(error);
+                    body.text('Unable to load attachments. Please try again.');
+                });
         }
 
         function showDetailsModal(officeId, name, postcode, status) {

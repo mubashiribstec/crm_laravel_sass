@@ -80,6 +80,10 @@ class Office extends Model
     {
         return $this->hasMany(Unit::class, 'office_id');
     }
+    public function documents()
+    {
+        return $this->hasMany(OfficeDocument::class, 'office_id');
+    }
     public function contact()
     {
         return $this->morphMany(Contact::class, 'contactable');

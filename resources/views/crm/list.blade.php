@@ -11,6 +11,27 @@
         
     </style>
 @endsection
+@section('css')
+    <style>
+        /* Applicants with an unread SMS: the row blinks (box-shadow, so it shows over Bootstrap's table cell backgrounds) */
+        @keyframes crmUnreadMessageBlink {
+            0%, 100% { box-shadow: inset 0 0 0 9999px rgba(var(--bs-warning-rgb), 0.35); }
+            50% { box-shadow: inset 0 0 0 9999px rgba(var(--bs-warning-rgb), 0.05); }
+        }
+        #applicants_table tbody tr.crm-unread-message > td {
+            animation: crmUnreadMessageBlink 1.2s ease-in-out infinite;
+        }
+        #applicants_table tbody tr.crm-unread-message > td:first-child {
+            border-left: 3px solid var(--bs-warning);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #applicants_table tbody tr.crm-unread-message > td {
+                animation: none;
+                box-shadow: inset 0 0 0 9999px rgba(var(--bs-warning-rgb), 0.25);
+            }
+        }
+    </style>
+@endsection
 @section('content')
     <div class="row">
         <div class="col-lg-12">
@@ -656,6 +677,28 @@
                     pagination.html(paginationHtml);
                 }
             });
+
+            // Unread SMS blink: the server marks rows when the table loads; this re-checks the visible rows every
+            // 30 seconds, so a new message starts the blink and opening the applicant's chat (marks it read) stops it.
+            function refreshUnreadMessageRows() {
+                const ids = $('#applicants_table tbody tr[data-applicant-id]').map(function () {
+                    return $(this).attr('data-applicant-id');
+                }).get();
+                if (!ids.length || document.hidden) return;
+
+                $.ajax({
+                    url: @json(route('getCrmUnreadMessageApplicants')),
+                    type: 'POST',
+                    data: { applicant_ids: ids, _token: $('meta[name="csrf-token"]').attr('content') },
+                    success: function (response) {
+                        const unread = new Set((response.applicant_ids || []).map(String));
+                        $('#applicants_table tbody tr[data-applicant-id]').each(function () {
+                            $(this).toggleClass('crm-unread-message', unread.has($(this).attr('data-applicant-id')));
+                        });
+                    }
+                });
+            }
+            setInterval(refreshUnreadMessageRows, 30000);
 
             // Search logic helper
             function handleCustomSearch() {

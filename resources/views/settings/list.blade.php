@@ -63,6 +63,8 @@
                     <div class="list-group list-group-flush settings-menu" id="settings-menu">
                         <button class="list-group-item list-group-item-action active" data-target="#form-general"
                             type="button" id="menu-general" aria-controls="form-general">General Settings</button>
+                        <button class="list-group-item list-group-item-action" data-target="#form-version"
+                            type="button" id="menu-version" aria-controls="form-version">Application Version</button>
                         <button class="list-group-item list-group-item-action" data-target="#form-profile" type="button"
                             id="menu-profile" aria-controls="form-profile">Profile Settings</button>
                         <button class="list-group-item list-group-item-action" data-target="#form-google-maps"
@@ -102,6 +104,49 @@
                                     <button type="submit" class="btn btn-success">Save General</button>
                                 </div>
                             </form>
+                        </section>
+                        <section id="form-version" class="settings-form-section">
+                            <form id="versionSettingsForm" data-type="version">
+                                @csrf
+                                <div class="mb-3">
+                                    <label for="app_version" class="form-label">Current application version</label>
+                                    <input type="text" class="form-control" id="app_version" name="version"
+                                        value="{{ $appVersion }}" maxlength="50" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="version_reason" class="form-label">Reason for update</label>
+                                    <textarea class="form-control" id="version_reason" name="reason" rows="3"
+                                        maxlength="1000" required></textarea>
+                                </div>
+                                <div class="text-end">
+                                    <button type="submit" class="btn btn-success">Update Version</button>
+                                </div>
+                            </form>
+
+                            <hr>
+                            <h5>Version update history</h5>
+                            <div class="table-responsive">
+                                <table class="table table-striped" id="versionHistory">
+                                    <thead>
+                                        <tr>
+                                            <th>Version</th>
+                                            <th>Reason</th>
+                                            <th>Updated by</th>
+                                            <th>Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach ($versionHistory as $change)
+                                            <tr>
+                                                <td>{{ $change->version }}</td>
+                                                <td>{{ $change->reason }}</td>
+                                                <td>{{ $change->updated_by ?? 'System' }}</td>
+                                                <td>{{ \Illuminate\Support\Carbon::parse($change->created_at)->format('d M Y, h:i A') }}</td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
                         </section>
                         <!-- Profile Settings Form -->
                         <section id="form-profile" class="settings-form-section">
@@ -1195,6 +1240,43 @@
                         },
                         complete: function() {
                             // restore button
+                            $btn.prop('disabled', false).html(originalText);
+                        }
+                    });
+                } else if (formType === 'version') {
+                    const formData = new FormData(this);
+
+                    $btn.prop('disabled', true).html(
+                        '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...'
+                    );
+
+                    $.ajax({
+                        url: '{{ route('settings.version.save') }}',
+                        method: 'POST',
+                        data: formData,
+                        processData: false,
+                        contentType: false,
+                        success: function(response) {
+                            if (response.success) {
+                                const $row = $('<tr>');
+                                $('<td>').text(response.change.version).appendTo($row);
+                                $('<td>').text(response.change.reason).appendTo($row);
+                                $('<td>').text(response.change.updated_by).appendTo($row);
+                                $('<td>').text(response.change.created_at).appendTo($row);
+                                $('#versionHistory tbody').prepend($row);
+                                $('#app_version').val(response.change.version);
+                                $('#version_reason').val('');
+                                toastr.success(response.message);
+                            } else {
+                                toastr.error(response.message);
+                            }
+                        },
+                        error: function(xhr) {
+                            console.error('Error saving application version:', xhr.responseText);
+                            toastr.error(xhr.responseJSON?.message ||
+                                'Failed to save application version.');
+                        },
+                        complete: function() {
                             $btn.prop('disabled', false).html(originalText);
                         }
                     });

@@ -220,6 +220,156 @@
                                 <div class="invalid-feedback">Please provide notes</div>
                             </div>
                         </div>
+                        <div class="col-lg-12">
+                            <div class="mb-3">
+                                <label for="officeAttachmentDropzone" class="form-label">Add Attachments</label>
+                                <div id="officeAttachmentDropzone" class="dropzone dz-clickable attachment-dropzone">
+                                    <div class="dz-message needsclick">
+                                        <i class="h1 ri-upload-cloud-2-line"></i>
+                                        <h3>Drop files here or click to upload.</h3>
+                                        <span class="text-muted fs-13">You can attach multiple files (up to 10 MB each).</span>
+                                    </div>
+                                </div>
+                                <ul class="list-unstyled mb-0" id="officeAttachmentPreview"></ul>
+                                <div id="dz-preview-template" style="display:none;">
+                                    <li class="mt-2 dz-preview dz-file-preview">
+                                        <div class="border rounded">
+                                            <div class="d-flex p-2">
+                                                <div class="flex-shrink-0 me-3">
+                                                    <div class="avatar-sm bg-light rounded d-flex align-items-center justify-content-center">
+                                                        <div data-dz-thumbnail class="dz-iconify">
+                                                            <iconify-icon icon="solar:file-bold" class="fs-32 text-secondary"></iconify-icon>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="flex-grow-1">
+                                                    <div class="pt-1">
+                                                        <h5 class="fs-14 mb-1" data-dz-name></h5>
+                                                        <p class="fs-13 text-muted mb-0" data-dz-size></p>
+                                                        <strong class="error text-danger" data-dz-errormessage></strong>
+                                                    </div>
+                                                </div>
+                                                <div class="flex-shrink-0 ms-3">
+                                                    <button data-dz-remove class="btn btn-sm btn-transparent text-danger" title="Remove file">
+                                                        <iconify-icon icon="solar:trash-bin-minimalistic-bold" class="text-danger fs-24"></iconify-icon>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </li>
+                                </div>
+                                <div class="invalid-feedback"></div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Saved Attachments</label>
+                                <div id="officeSavedDocuments" class="row g-3">
+                                    @forelse ($office->documents as $document)
+                                        @php
+                                            $extension = strtolower($document->document_extension ?? pathinfo($document->document_name, PATHINFO_EXTENSION));
+                                            $previewUrl = route('head-offices.documents.show', ['id' => $office->id, 'documentId' => $document->id]);
+                                        @endphp
+                                        <div class="col-6 col-md-4 col-lg-2 saved-document">
+                                            <div class="card h-100">
+                                                <a href="{{ $previewUrl }}" target="_blank" rel="noopener"
+                                                    class="d-flex align-items-center justify-content-center bg-light border-bottom overflow-hidden"
+                                                    style="height: 150px; color: inherit;">
+                                                    @if (in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp'], true))
+                                                        <img src="{{ $previewUrl }}" alt="{{ $document->document_name }}"
+                                                            class="w-100 h-100" style="object-fit: contain;">
+                                                    @elseif ($extension === 'pdf')
+                                                        <iframe src="{{ $previewUrl }}" title="PDF preview"
+                                                            class="w-100 h-100" style="border: 0; pointer-events: none;"
+                                                            tabindex="-1"></iframe>
+                                                    @else
+                                                        <div class="text-center">
+                                                            <iconify-icon icon="solar:document-text-bold-duotone"
+                                                                class="text-primary" style="font-size: 56px;"></iconify-icon>
+                                                            <div class="small text-muted">{{ strtoupper($extension ?: 'FILE') }}</div>
+                                                        </div>
+                                                    @endif
+                                                </a>
+                                                <div class="card-body p-2">
+                                                    <div class="small text-truncate" title="{{ $document->document_name }}">
+                                                        {{ $document->document_name }}
+                                                    </div>
+                                                    <div class="small text-muted mb-2">
+                                                        {{ number_format(($document->document_size ?? 0) / 1024, 1) }} KB
+                                                    </div>
+                                                    <button type="button" class="btn btn-sm btn-outline-danger remove-saved-document"
+                                                        data-delete-url="{{ route('head-offices.documents.destroy', ['id' => $office->id, 'documentId' => $document->id]) }}"
+                                                        data-restore-url="{{ route('head-offices.documents.restore', ['id' => $office->id, 'documentId' => $document->id]) }}"
+                                                        data-document-name="{{ $document->document_name }}"
+                                                        data-document-size="{{ $document->document_size ?? 0 }}"
+                                                        aria-label="Remove {{ $document->document_name }}" title="Remove attachment">
+                                                        <iconify-icon icon="solar:trash-bin-minimalistic-bold" aria-hidden="true" style="font-size: 16px;"></iconify-icon>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    @empty
+                                        <div class="text-muted no-saved-documents col-12">No attachments saved.</div>
+                                    @endforelse
+                                </div>
+                            </div>
+                            <div class="mb-3" id="officeDeletedDocumentsSection">
+                                <label class="form-label">Temporarily Deleted Attachments</label>
+                                <div id="officeDeletedDocuments" class="row g-3">
+                                    @forelse ($deletedDocuments as $document)
+                                        @php
+                                            $extension = strtolower($document->document_extension ?? pathinfo($document->document_name, PATHINFO_EXTENSION));
+                                            $previewUrl = route('head-offices.documents.show', ['id' => $office->id, 'documentId' => $document->id]);
+                                        @endphp
+                                        <div class="col-6 col-md-4 col-lg-2 deleted-document">
+                                            <div class="card h-100">
+                                                <a href="{{ $previewUrl }}" target="_blank" rel="noopener"
+                                                    class="d-flex align-items-center justify-content-center bg-light border-bottom overflow-hidden"
+                                                    style="height: 150px; color: inherit;">
+                                                    @if (in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp'], true))
+                                                        <img src="{{ $previewUrl }}" alt="{{ $document->document_name }}"
+                                                            class="w-100 h-100" style="object-fit: contain;">
+                                                    @elseif ($extension === 'pdf')
+                                                        <iframe src="{{ $previewUrl }}" title="PDF preview"
+                                                            class="w-100 h-100" style="border: 0; pointer-events: none;"
+                                                            tabindex="-1"></iframe>
+                                                    @else
+                                                        <div class="text-center">
+                                                            <iconify-icon icon="solar:document-text-bold-duotone"
+                                                                class="text-primary" style="font-size: 56px;"></iconify-icon>
+                                                            <div class="small text-muted">{{ strtoupper($extension ?: 'FILE') }}</div>
+                                                        </div>
+                                                    @endif
+                                                </a>
+                                                <div class="card-body p-2">
+                                                    <div class="small text-truncate" title="{{ $document->document_name }}">
+                                                        {{ $document->document_name }}
+                                                    </div>
+                                                    <div class="small text-muted">
+                                                        {{ number_format(($document->document_size ?? 0) / 1024, 1) }} KB
+                                                    </div>
+                                                    <div class="small text-danger mb-2 deleted-at">
+                                                        Deleted: {{ $document->deleted_at->format('d M Y, h:i A') }}
+                                                    </div>
+                                                    @if ($document->delete_reason)
+                                                        <div class="small text-muted mb-2 deleted-reason" title="{{ $document->delete_reason }}">
+                                                            Reason: {{ \Illuminate\Support\Str::limit($document->delete_reason, 80) }}
+                                                        </div>
+                                                    @endif
+                                                    <button type="button" class="btn btn-sm btn-outline-success restore-saved-document"
+                                                        data-restore-url="{{ route('head-offices.documents.restore', ['id' => $office->id, 'documentId' => $document->id]) }}"
+                                                        data-delete-url="{{ route('head-offices.documents.destroy', ['id' => $office->id, 'documentId' => $document->id]) }}"
+                                                        data-preview-url="{{ $previewUrl }}"
+                                                        data-document-name="{{ $document->document_name }}"
+                                                        data-document-size="{{ $document->document_size ?? 0 }}"
+                                                        title="Restore attachment">Restore</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    @empty
+                                        <div class="text-muted no-deleted-documents col-12">No temporarily deleted attachments.</div>
+                                    @endforelse
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="mb-3 rounded">
                         <div class="row justify-content-end g-2">
@@ -295,6 +445,8 @@
 
                 // Collect form data
                 const formData = new FormData(form);
+                document.querySelector('#officeAttachmentDropzone')?.dropzone?.getAcceptedFiles()
+                    .forEach(file => formData.append('attachments[]', file));
 
                 fetch(form.action, {
                         method: 'POST',
@@ -321,17 +473,21 @@
                                 });
                                 form.querySelectorAll('.invalid-feedback').forEach(el => {
                                     el.textContent = '';
+                                    el.classList.remove('d-block');
                                 });
 
                                 // Display new errors
                                 Object.entries(data.errors).forEach(([field, messages]) => {
-                                    const input = form.querySelector(`[name="${field}"]`);
+                                    const input = (/^attachments\.\d+$/.test(field) || field === 'attachments')
+                                        ? form.querySelector('#officeAttachmentDropzone')
+                                        : form.querySelector(`[name="${field}"]`);
                                     const feedback = input?.closest('.mb-3')?.querySelector(
                                         '.invalid-feedback');
 
                                     if (input && feedback) {
                                         input.classList.add('is-invalid');
                                         feedback.textContent = messages.join(' ');
+                                        feedback.classList.add('d-block');
                                     }
                                 });
                             } else {
@@ -377,6 +533,137 @@
                     }
                 });
             });
+        });
+    </script>
+    <script>
+        document.addEventListener('click', function(event) {
+            const button = event.target.closest('.remove-saved-document');
+            if (!button) return;
+
+            Swal.fire({
+                title: 'Remove attachment?',
+                text: 'This file will be deleted temporarily and removed permanently after 3 days. Please be careful.',
+                input: 'textarea',
+                inputLabel: 'Reason for temporarily deleting this attachment',
+                inputPlaceholder: 'Enter the reason for deletion',
+                inputAttributes: { maxlength: 2000 },
+                showCancelButton: true,
+                confirmButtonText: 'Remove',
+                confirmButtonColor: '#dc3545',
+                preConfirm: reason => {
+                    if (!reason || reason.trim().length < 3) {
+                        Swal.showValidationMessage('Please provide a reason of at least 3 characters.');
+                        return false;
+                    }
+                    return reason.trim();
+                }
+            }).then(result => {
+                if (!result.isConfirmed) return;
+
+                button.disabled = true;
+                fetch(button.dataset.deleteUrl, {
+                    method: 'DELETE',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': @json(csrf_token()),
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({ reason: result.value })
+                })
+                    .then(async response => {
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok || !data.success) {
+                            throw new Error(data.message || 'Unable to remove attachment.');
+                        }
+                        const card = button.closest('.saved-document');
+                        card.classList.replace('saved-document', 'deleted-document');
+                        const cardBody = card.querySelector('.card-body');
+                        button.remove();
+
+                        const deletedAt = document.createElement('div');
+                        deletedAt.className = 'small text-danger mb-2 deleted-at';
+                        deletedAt.textContent = `Deleted: ${data.deleted_at}`;
+                        const reason = document.createElement('div');
+                        reason.className = 'small text-muted mb-2 deleted-reason';
+                        reason.textContent = `Reason: ${result.value}`;
+
+                        const restoreButton = document.createElement('button');
+                        restoreButton.type = 'button';
+                        restoreButton.className = 'btn btn-sm btn-outline-success restore-saved-document';
+                        restoreButton.dataset.restoreUrl = button.dataset.restoreUrl;
+                        restoreButton.dataset.deleteUrl = button.dataset.deleteUrl;
+                        restoreButton.dataset.documentName = button.dataset.documentName;
+                        restoreButton.dataset.documentSize = button.dataset.documentSize;
+                        restoreButton.title = 'Restore attachment';
+                        restoreButton.textContent = 'Restore';
+                        cardBody.append(deletedAt, reason, restoreButton);
+
+                        document.querySelector('#officeSavedDocuments .no-saved-documents')?.remove();
+                        if (!document.querySelector('#officeSavedDocuments .saved-document')) {
+                            document.getElementById('officeSavedDocuments').innerHTML =
+                                '<div class="text-muted no-saved-documents col-12">No attachments saved.</div>';
+                        }
+                        document.getElementById('officeDeletedDocuments').querySelector('.no-deleted-documents')?.remove();
+                        document.getElementById('officeDeletedDocuments').append(card);
+                        return Swal.fire('Removed', data.message, 'success');
+                    })
+                    .catch(error => {
+                        button.disabled = false;
+                        Swal.fire('Unable to remove attachment', error.message, 'error');
+                    });
+            });
+        });
+    </script>
+    <script>
+        document.addEventListener('click', function(event) {
+            const button = event.target.closest('.restore-saved-document');
+            if (!button) return;
+
+            button.disabled = true;
+            fetch(button.dataset.restoreUrl, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': @json(csrf_token()),
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+                .then(async response => {
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.message || 'Unable to restore attachment.');
+                    }
+
+                    const card = button.closest('.deleted-document');
+                    const cardBody = card.querySelector('.card-body');
+                    cardBody.querySelectorAll('.deleted-at, .deleted-reason').forEach(element => element.remove());
+                    button.remove();
+                    card.classList.replace('deleted-document', 'saved-document');
+
+                    const removeButton = document.createElement('button');
+                    removeButton.type = 'button';
+                    removeButton.className = 'btn btn-sm btn-outline-danger remove-saved-document';
+                    removeButton.dataset.deleteUrl = button.dataset.deleteUrl;
+                    removeButton.dataset.documentName = button.dataset.documentName;
+                    removeButton.setAttribute('aria-label', `Remove ${button.dataset.documentName}`);
+                    removeButton.title = 'Remove attachment';
+                    removeButton.innerHTML = '<iconify-icon icon="solar:trash-bin-minimalistic-bold" aria-hidden="true" style="font-size: 16px;"></iconify-icon>';
+                    cardBody.append(removeButton);
+
+                    document.querySelector('#officeSavedDocuments .no-saved-documents')?.remove();
+                    document.getElementById('officeSavedDocuments').append(card);
+
+                    if (!document.querySelector('#officeDeletedDocuments .deleted-document')) {
+                        document.getElementById('officeDeletedDocuments').innerHTML =
+                            '<div class="text-muted no-deleted-documents col-12">No temporarily deleted attachments.</div>';
+                    }
+                    toastr.success(data.message);
+                })
+                .catch(error => {
+                    button.disabled = false;
+                    Swal.fire('Unable to restore attachment', error.message, 'error');
+                });
         });
     </script>
 @endsection

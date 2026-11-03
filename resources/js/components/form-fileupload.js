@@ -40,49 +40,41 @@ document.addEventListener("DOMContentLoaded", function () {
         thumbnailContainer.innerHTML = `<iconify-icon icon="${icon}" class="fs-32 ${colorClass}"></iconify-icon>`;
     }
 
-    // 1. Applicant CV Dropzone (Single file, max 10MB, pdf,doc,docx,txt)
-    const applicantCvElement = document.querySelector("#applicantCvDropzone");
-    if (applicantCvElement) {
-        new Dropzone("#applicantCvDropzone", {
+    function initializeDropzone(elementId, previewId, options = {}) {
+        const element = document.querySelector(`#${elementId}`);
+        if (!element) return;
+
+        new Dropzone(element, {
             url: "/",
             method: "post",
             autoProcessQueue: false,
-            previewsContainer: "#dropzone-preview",
+            previewsContainer: `#${previewId}`,
             previewTemplate: previewTemplate,
-            acceptedFiles: ".pdf,.doc,.docx,.txt",
-            maxFilesize: 10,       // max file size in MB
-            maxFiles: 1,           // allow only 1 file
-            clickable: true,       // allows clicking to select file
-
+            maxFilesize: 10,
+            acceptedFiles: options.acceptedFiles,
+            maxFiles: options.maxFiles,
+            clickable: true,
             init: function () {
                 this.on("addedfile", handleAddedFile);
-
-                // Remove previous file if user adds a new one
-                this.on("maxfilesexceeded", function(file) {
-                    this.removeAllFiles(); // remove previous file
-                    this.addFile(file);    // add new one
-                });
+                if (options.singleFile) {
+                    this.on("maxfilesexceeded", function (file) {
+                        this.removeAllFiles();
+                        this.addFile(file);
+                    });
+                }
             }
         });
     }
 
-    // 2. Sales Attachments Dropzone (Multiple files, max 10MB, pdf,doc,docx,csv)
-    const salesAttachmentElement = document.querySelector("#salesAttachmentDropzone");
-    if (salesAttachmentElement) {
-        new Dropzone("#salesAttachmentDropzone", {
-            url: "/",
-            method: "post",
-            autoProcessQueue: false,
-            previewsContainer: "#dropzone-preview",
-            previewTemplate: previewTemplate,
-            acceptedFiles: ".pdf,.doc,.docx,.txt",
-            maxFilesize: 10,       // max file size in MB
-            maxFiles: 20,          // allow multiple files (up to 20)
-            clickable: true,       // allows clicking to select file
-
-            init: function () {
-                this.on("addedfile", handleAddedFile);
-            }
-        });
-    }
+    initializeDropzone("applicantCvDropzone", "dropzone-preview", {
+        acceptedFiles: ".pdf,.doc,.docx,.txt",
+        maxFiles: 1,
+        singleFile: true
+    });
+    initializeDropzone("salesAttachmentDropzone", "dropzone-preview", {
+        acceptedFiles: ".pdf,.doc,.docx,.txt",
+        maxFiles: 20
+    });
+    initializeDropzone("officeAttachmentDropzone", "officeAttachmentPreview");
+    initializeDropzone("unitAttachmentDropzone", "unitAttachmentPreview");
 });

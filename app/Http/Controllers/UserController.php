@@ -525,8 +525,8 @@ class UserController extends Controller
                                 $logout->addDay();
                             }
 
-                            // Difference in total minutes
-                            $diffInMinutes = $logout->diffInMinutes($login);
+                            // Difference in total minutes (login -> logout; Carbon 3 returns a signed value)
+                            $diffInMinutes = (int) $login->diffInMinutes($logout);
                             $hours = intdiv($diffInMinutes, 60);
                             $minutes = $diffInMinutes % 60;
 
@@ -628,8 +628,8 @@ class UserController extends Controller
                                 $logout->addDay();
                             }
 
-                            // Difference in total minutes
-                            $diffInMinutes = $logout->diffInMinutes($login);
+                            // Difference in total minutes (login -> logout; Carbon 3 returns a signed value)
+                            $diffInMinutes = (int) $login->diffInMinutes($logout);
                             $hours = intdiv($diffInMinutes, 60);
                             $minutes = $diffInMinutes % 60;
 

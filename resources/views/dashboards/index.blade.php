@@ -1146,11 +1146,11 @@
                     jobSourceHtml += `
                             <div class="row text-center">
                                 ${resp.job_sources.map(src => `
-                                                    <div class="col-md-3 col-6 mb-2">
-                                                        <small class="text-muted d-block">${src.name}</small>
-                                                        <span class="fw-bold fs-5">${src.total}</span>
-                                                    </div>
-                                                `).join('')}
+                                                        <div class="col-md-3 col-6 mb-2">
+                                                            <small class="text-muted d-block">${src.name}</small>
+                                                            <span class="fw-bold fs-5">${src.total}</span>
+                                                        </div>
+                                                    `).join('')}
                             </div>
                         `;
                 } else {
@@ -1420,6 +1420,27 @@
                         applicants_created: 'user-line-duotone',
                         applicants_updated: 'user-line-duotone',
                         cvs_cleared_reverted: 'restart-line-duotone',
+                        current_total_sales: 'case-round-line-duotone',
+                        current_active_sales: 'check-circle-line-duotone',
+                        current_reopen_sales: 'restart-line-duotone',
+                        current_onhold_sales: 'pause-circle-line-duotone',
+                        current_pending_onhold_sales: 'stopwatch-line-duotone',
+                        current_pending_sales: 'hourglass-line-duotone',
+                        current_rejected_sales: 'close-circle-line-duotone',
+                        current_closed_sales: 'lock-keyhole-line-duotone',
+                        current_blacklisted_sales: 'forbidden-circle-line-duotone',
+                    };
+
+                    const currentSalesColors = {
+                        current_total_sales: 'primary',
+                        current_active_sales: 'success',
+                        current_reopen_sales: 'dark',
+                        current_onhold_sales: 'warning',
+                        current_pending_onhold_sales: 'warning',
+                        current_pending_sales: 'info',
+                        current_rejected_sales: 'danger',
+                        current_closed_sales: 'secondary',
+                        current_blacklisted_sales: 'danger',
                     };
 
                     const prevIcons = {
@@ -1429,17 +1450,27 @@
                     };
 
                     const labelOverrides = {
-                        cvs_cleared_reverted: 'Cleared Reverted'
+                        cvs_cleared_reverted: 'Cleared Reverted',
+                        current_total_sales: 'Total Sales Handled',
+                        current_active_sales: 'Live & Active',
+                        current_reopen_sales: 'Re-Opened',
+                        current_onhold_sales: 'On Hold',
+                        current_pending_onhold_sales: 'Awaiting On-Hold Approval',
+                        current_pending_sales: 'Pending Approval',
+                        current_rejected_sales: 'Rejected',
+                        current_closed_sales: 'Closed',
+                        current_blacklisted_sales: 'Blacklisted',
                     };
 
                     const CARD_COL = 'col-12 col-sm-6 col-md-4 col-lg-3';
 
                     // ── Unified card renderer ─────────────────────────────────────
-                    function renderStatBlock(data, icons, badgeClass) {
+                    function renderStatBlock(data, icons, defaultClass, colors = {}) {
                         let html = `<div class="row g-3">`;
                         Object.entries(data).forEach(([key, value]) => {
-                            const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                            const label = labelOverrides[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                             const icon = icons[key] || 'dot-line-duotone';
+                            const badgeClass = colors[key] || defaultClass;
                             html += `
                                 <div class="${CARD_COL}">
                                     <div class="d-flex align-items-center border rounded p-3 h-100 stat-card-clickable"
@@ -1522,6 +1553,13 @@
                         notesHtml += renderStatBlock(response.sales_stats, currentIcons, 'primary');
                     }
 
+                    if (rt === 'sales' &&
+                        response.current_sales_stats && Object.keys(response.current_sales_stats).length > 0) {
+                        notesHtml += '<h6 class="mt-4 mb-1">Current Statistics</h6>';
+                        notesHtml += '<p class="text-muted small mb-2">Where the sales this user added or updated in the selected range stand right now.</p>';
+                        notesHtml += renderStatBlock(response.current_sales_stats, currentIcons, 'primary', currentSalesColors);
+                    }
+
                     if ((rt === 'agent' || rt === 'team_lead') &&
                         response.prev_user_stats && Object.keys(response.prev_user_stats).length > 0) {
                         notesHtml += '<h6 class="mt-4">Previous Month Stats</h6>';
@@ -1579,36 +1617,46 @@
 
             function createDrawer() {
                 const drawerHtml = `
-                    <div class="offcanvas offcanvas-end" tabindex="-1" id="${drawerId}"
-                        style="width:80%; z-index:1080; visibility:hidden;">
+            <div class="offcanvas offcanvas-end" tabindex="-1" id="${drawerId}"
+                style="width:80%; z-index:1080; visibility:hidden;">
 
-                        <div class="offcanvas-header bg-primary text-white">
-                            <h5 class="offcanvas-title">
-                                <iconify-icon icon="solar:list-line-duotone" class="me-2"></iconify-icon>
-                                ${label} — Details
-                            </h5>
-                            <button type="button" class="btn-close btn-close-white"
-                                    data-bs-dismiss="offcanvas"></button>
-                        </div>
+                <div class="offcanvas-header bg-primary text-white">
+                    <h5 class="offcanvas-title">
+                        <iconify-icon icon="solar:list-line-duotone" class="me-2"></iconify-icon>
+                        ${label} — Details
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white"
+                            data-bs-dismiss="offcanvas"></button>
+                </div>
 
-                        <div class="offcanvas-body" style="background-color:#e1e5ec; overflow-y:auto;">
-                            <div class="text-center py-4" id="${drawerId}-loader">
-                                <div class="spinner-border text-primary"></div>
-                                <p class="mt-2 text-muted">Loading details...</p>
-                            </div>
-                            <div id="${drawerId}-content" class="d-none"></div>
-                        </div>
-
-                        <div class="border-top p-3 d-flex justify-content-between align-items-center">
-                            <span class="text-muted small" id="${drawerId}-total"></span>
-                            <button class="btn btn-dark btn-sm" data-bs-dismiss="offcanvas">Close</button>
-                        </div>
+                <div class="offcanvas-body" style="background-color:#e1e5ec; overflow-y:auto;">
+                    <div class="text-center py-4" id="${drawerId}-loader">
+                        <div class="spinner-border text-primary"></div>
+                        <p class="mt-2 text-muted">Loading details...</p>
                     </div>
-                `;
+                    <div id="${drawerId}-content" class="d-none"></div>
+                </div>
+
+                <div class="border-top p-3 d-flex justify-content-between align-items-center">
+                    <span class="text-muted small" id="${drawerId}-total"></span>
+                    <button class="btn btn-dark btn-sm" data-bs-dismiss="offcanvas">Close</button>
+                </div>
+            </div>
+        `;
 
                 $('body').append(drawerHtml);
 
                 const drawerEl = document.getElementById(drawerId);
+                const tableId = `${drawerId}-table`;
+
+                // Re-adjust table layout once the slide animation has finished
+                function adjustTable() {
+                    if ($.fn.DataTable.isDataTable(`#${tableId}`)) {
+                        const dt = $(`#${tableId}`).DataTable();
+                        dt.columns.adjust();
+                        if (dt.responsive) dt.responsive.recalc();
+                    }
+                }
 
                 requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
@@ -1619,17 +1667,20 @@
                             scroll: true
                         });
 
-                        // ✅ FIX: Bootstrap's offcanvas focus trap intercepts clicks on inputs.
-                        //    Removing the listener that Bootstrap attaches for focus management
-                        //    allows the DataTable search input to receive clicks normally.
+                        // FIX: Bootstrap's focus trap steals focus from the search input.
+                        // Deactivate it once the drawer is shown.
                         drawerEl.addEventListener('shown.bs.offcanvas', function() {
+                            if (drawer._focustrap && typeof drawer._focustrap.deactivate ===
+                                'function') {
+                                drawer._focustrap.deactivate();
+                            }
                             drawerEl.removeAttribute('tabindex');
+                            adjustTable();
                         }, {
                             once: true
                         });
 
                         drawerEl.addEventListener('hidden.bs.offcanvas', function() {
-                            const tableId = `${drawerId}-table`;
                             if ($.fn.DataTable.isDataTable(`#${tableId}`)) {
                                 $(`#${tableId}`).DataTable().destroy();
                             }
@@ -1644,68 +1695,69 @@
                         loadDrawerContent(drawerId);
                     });
                 });
-            }
 
-            function loadDrawerContent(id) {
-                $.ajax({
-                    url: '{{ route('getUserStatisticsDetail') }}',
-                    type: 'POST',
-                    data: {
-                        _token: "{{ csrf_token() }}",
-                        user_key: userId,
-                        stat_key: statKey,
-                        date_range_filter: window.userStatisticsDateRange
-                    },
-                    success: function(response) {
-                        $(`#${id}-loader`).hide();
-                        $(`#${id}-total`).text(`Total records: ${response.total}`);
+                function loadDrawerContent(id) {
+                    $.ajax({
+                        url: '{{ route('getUserStatisticsDetail') }}',
+                        type: 'POST',
+                        data: {
+                            _token: "{{ csrf_token() }}",
+                            user_key: userId,
+                            stat_key: statKey,
+                            date_range_filter: window.userStatisticsDateRange
+                        },
+                        success: function(response) {
+                            $(`#${id}-loader`).hide();
+                            $(`#${id}-total`).text(`Total records: ${response.total}`);
 
-                        if (!response.rows || response.rows.length === 0) {
+                            if (!response.rows || response.rows.length === 0) {
+                                $(`#${id}-content`)
+                                    .removeClass('d-none')
+                                    .html('<p class="text-muted text-center py-3">No records found.</p>');
+                                return;
+                            }
+
+                            const tableHtml = `
+                        <table id="${tableId}"
+                            class="table table-bordered table-hover table-sm align-middle w-100">
+                            <thead class="bg-dark">
+                                <tr>
+                                    ${response.columns.map(col =>
+                                        `<th class="text-nowrap text-white">${col}</th>`
+                                    ).join('')}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${response.rows.map(row => `
+                                        <tr>
+                                            ${row.map(cell => `<td>${cell ?? '—'}</td>`).join('')}
+                                        </tr>
+                                    `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+
                             $(`#${id}-content`)
                                 .removeClass('d-none')
-                                .html('<p class="text-muted text-center py-3">No records found.</p>');
-                            return;
-                        }
+                                .html(tableHtml);
 
-                        const tableId = `${id}-table`;
-
-                        let tableHtml = `
-                            <table id="${tableId}"
-                                class="table table-bordered table-hover table-sm align-middle w-100">
-                                <thead class="bg-dark">
-                                    <tr>
-                                        ${response.columns.map(col =>
-                                            `<th class="text-nowrap text-white">${col}</th>`
-                                        ).join('')}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${response.rows.map(row => `
-                                                                                            <tr>
-                                                                                                ${row.map(cell => `<td>${cell ?? '—'}</td>`).join('')}
-                                                                                            </tr>
-                                                                                        `).join('')}
-                                </tbody>
-                            </table>
-                        `;
-
-                        $(`#${id}-content`)
-                            .removeClass('d-none')
-                            .html(tableHtml);
-
-                        setTimeout(() => {
                             $(`#${tableId}`).DataTable({
                                 pageLength: 10,
+                                lengthMenu: [
+                                    [10, 25, 50, 100, -1],
+                                    [10, 25, 50, 100, 'All']
+                                ],
                                 responsive: true,
                                 ordering: true,
-                                searching: true,
+                                searching: false,
+                                lengthChange: true,
                                 destroy: true,
-                                dom: 'Brtip',
+                                dom: '<"d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mb-3"<"stat-table-length"l><"stat-table-buttons"B>>rtip',
 
                                 buttons: [{
                                         extend: 'csvHtml5',
                                         text: '📥 CSV',
-                                        className: 'btn btn-success btn-sm me-1',
+                                        className: 'btn btn-success btn-sm',
                                         title: label
                                     },
                                     {
@@ -1718,35 +1770,38 @@
                                     }
                                 ],
 
+                                // Works for both DataTables 1.x (.dataTables_*) and 2.x (.dt-*)
                                 initComplete: function() {
-                                    const wrapper = `#${tableId}_wrapper`;
+                                    const wrapper = $(`#${tableId}_wrapper`);
 
-                                    // Style search input - DON'T modify aria attributes
-                                    $(`${wrapper} .dataTables_filter input`)
-                                        .addClass('form-control form-control-sm')
-                                        .attr('placeholder', 'Search records...')
+                                    wrapper.find('.stat-table-length label, .stat-table-length .dt-length')
+                                        .addClass('d-flex align-items-center gap-2 mb-0 text-nowrap');
+
+                                    wrapper.find('.stat-table-length select')
+                                        .addClass('form-select form-select-sm')
                                         .css({
-                                            'width': '250px',
-                                            'margin-left': '8px'
+                                            width: 'auto',
+                                            minWidth: '76px'
                                         });
 
-                                    $(`${wrapper} .dataTables_filter label`)
-                                        .addClass('d-flex align-items-center gap-2 mb-0')
-                                        .css('font-weight', '500');
+                                    wrapper.find('.stat-table-buttons .dt-buttons')
+                                        .addClass('d-flex flex-wrap gap-2 justify-content-sm-end');
 
-                                    $(`${wrapper} .dt-buttons`)
-                                        .addClass('d-inline-block me-2');
+                                    // If the drawer is already fully open, fix widths now
+                                    if (drawerEl.classList.contains('show')) {
+                                        adjustTable();
+                                    }
                                 }
                             });
-                        }, 150);
-                    },
-                    error: function(xhr) {
-                        $(`#${id}-loader`).hide();
-                        $(`#${id}-content`)
-                            .removeClass('d-none')
-                            .html('<p class="text-danger text-center">Error loading details.</p>');
-                    }
-                });
+                        },
+                        error: function() {
+                            $(`#${id}-loader`).hide();
+                            $(`#${id}-content`)
+                                .removeClass('d-none')
+                                .html('<p class="text-danger text-center">Error loading details.</p>');
+                        }
+                    });
+                }
             }
         }
 
