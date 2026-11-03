@@ -23,7 +23,7 @@ Route::get('/sales/open', [ApiController::class, 'openSalesApi'])
      ->name('api.sales.open');
 
 Route::get('/sales/open/kingsburypersonnel', [ApiController::class, 'openkingsburypersonnelSalesApi'])
-     ->name('api.sales.open');
+     ->name('api.sales.open.kingsbury');    // was a second 'api.sales.open'
 
 Route::get('/sales/details/{id}', [ApiController::class, 'getSaleDetailsApi'])
      ->name('api.sales.details');

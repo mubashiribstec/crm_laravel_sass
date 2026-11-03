@@ -131,8 +131,8 @@ class Batch3Test extends XplogentTestCase
         $this->assertSame(['status' => 1, 'stored_status' => 2], $audit['changes_made']);
 
         // hold: needs a hold permission and a valid state
-        $this->actingAs($noter)->getJson('/changeSaleHoldStatus?id=' . $sale->id . '&status=1')->assertForbidden();
-        $this->actingAs($manager)->getJson('/changeSaleHoldStatus?id=' . $sale->id . '&status=7')->assertStatus(422);
+        $this->actingAs($noter)->postJson('/changeSaleHoldStatus', ['id' => $sale->id, 'status' => 1])->assertForbidden();
+        $this->actingAs($manager)->postJson('/changeSaleHoldStatus', ['id' => $sale->id, 'status' => 7])->assertStatus(422);
 
         // approving a hold only for a sale that is waiting for approval
         $approver = $this->staff('Pat Approver', 'sale-pending-hold-mark-approved');
@@ -205,5 +205,36 @@ class Batch3Test extends XplogentTestCase
         $ids = array_column($this->signed('/api/xplogent/campaigns/queue', ['sale_id' => $sale->id])
             ->assertOk()->json('candidates'), 'applicant_id');
         $this->assertSame([$here->id], $ids);
+    }
+
+    // ── R-03 – R-06: routes ──────────────────────────────────────────────────
+    public function test_logout_and_the_hold_change_are_post_only_and_route_names_are_unique(): void
+    {
+        $user = $this->staff('Jane Recruiter', 'sale-mark-on-hold');
+        \Horsefly\LoginDetail::create(['user_id' => $user->id, 'ip_address' => '127.0.0.1', 'login_at' => now()]);
+        $this->actingAs($user)->get('/logout')->assertNotFound();                      // a link can't log you out
+        $this->assertAuthenticatedAs($user);
+        $this->actingAs($user)->post('/logout')->assertRedirect(route('login'));
+        $this->assertGuest();
+        $this->assertNotNull(\Horsefly\LoginDetail::where('user_id', $user->id)->value('logout_at'));
+
+        $sale = $this->sale();
+        $this->actingAs($user)->getJson('/changeSaleHoldStatus?id=' . $sale->id . '&status=1')->assertNotFound();
+        $this->assertSame(0, (int) $sale->fresh()->is_on_hold);                         // a GET changes nothing
+
+        $this->assertSame(url('/login'), route('login'));
+        $this->assertSame('App\\Http\\Controllers\\Auth\\LoginController@showLoginForm',
+            app('router')->getRoutes()->getByName('login')->getActionName());
+        $this->assertNotSame(route('api.sales.open'), route('api.sales.open.kingsbury'));
+        $names = collect(app('router')->getRoutes()->getRoutes())->map->getName()->filter();
+        $this->assertSame($names->count(), $names->unique()->count(), 'duplicate route names: '
+            . $names->duplicates()->implode(', '));
+        foreach (app('router')->getRoutes()->getRoutes() as $route) {                   // R-03/R-04: every action exists
+            $action = $route->getActionName();
+            if (str_contains($action, '@')) {
+                [$class, $method] = explode('@', $action);
+                $this->assertTrue(method_exists($class, $method), "{$route->uri()} → {$action}");
+            }
+        }
     }
 }
