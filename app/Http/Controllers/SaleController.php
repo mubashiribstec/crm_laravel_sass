@@ -4268,7 +4268,6 @@ class SaleController extends Controller
             ->addColumn('notes_created_at', function ($applicant) {
                 return Carbon::parse($applicant->notes_created_at)->format('d M Y, h:i A');
             })
-            ->orderColumn('notes_created_at', 'notes_created_at $1') // ✅ direct column name
             ->addColumn('applicant_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->applicant_cv, $applicant->is_blocked, 'original', 'success', 'Download CV'))
             ->addColumn('crm_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->updated_cv, $applicant->is_blocked, 'updated', 'primary', 'Download Updated CV'))
             ->addColumn('paid_status', function ($applicant) use ($sale_id) {
@@ -4305,7 +4304,6 @@ class SaleController extends Controller
 
                 return '<span class="badge ' . $color_class . '">' . ucwords($status_value) . '</span>';
             })
-            ->orderColumn('paid_status', 'paid_status_order $1')
             ->addColumn('action', function ($applicant) use ($sale_id, $sale, $sale_cv_counts) {
                 $status_value = $this->getApplicantStatusForSale($applicant, $sale_id);
 
@@ -4363,6 +4361,9 @@ class SaleController extends Controller
                 // ✅ notes_created_at removed from rawColumns (plain formatted text, not HTML)
             ])
             ->with(['sale_id' => $sale_id])
+            // Sorted above from the allowlist only. DataTables' own sort would also add the column
+            // named in the request (an unknown one was a 500).
+            ->order(function () {})
             ->make(true);
     }
     private function getApplicantStatusForSale($applicant, $sale_id): string

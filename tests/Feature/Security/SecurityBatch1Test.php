@@ -85,19 +85,30 @@ class SecurityBatch1Test extends XplogentTestCase
     // ── B-09 / L-02: radius table sorting ────────────────────────────────────
     public function test_radius_table_sort_direction_and_column_are_allowlisted(): void
     {
+        // As in production (APP_DEBUG=false): with debug on, DataTables answers 200 even when it refuses.
+        config(['app.debug' => false]);
+        $sql = [];
+        \Illuminate\Support\Facades\DB::listen(function ($query) use (&$sql) { $sql[] = $query->sql; });
         $sale = $this->sale();
         $this->applicant();
         $user = $this->staff('Jane Recruiter', 'sale-view');
-        $query = http_build_query(['sale_id' => $sale->id, 'radius' => 15, 'draw' => 1,
-            'columns' => [['data' => 'notes_created_at'], ['data' => 'paid_status'], ['data' => 'sleep(5)']],
-            'order' => [['column' => 0, 'dir' => 'desc, (select 1 from users)']]]);
-        $this->actingAs($user)->getJson('/getApplicantsBySaleRadius?' . $query, ['X-Requested-With' => 'XMLHttpRequest'])
-            ->assertOk();
-        foreach ([1, 2] as $col) {                                          // computed and unknown columns
-            $q = str_replace('order%5B0%5D%5Bcolumn%5D=0', 'order%5B0%5D%5Bcolumn%5D=' . $col, $query);
-            $this->actingAs($user)->getJson('/getApplicantsBySaleRadius?' . $q, ['X-Requested-With' => 'XMLHttpRequest'])
-                ->assertOk();
+        $get = fn (array $params) => $this->actingAs($user)->getJson('/getApplicantsBySaleRadius?' . http_build_query(
+            ['sale_id' => $sale->id, 'radius' => 15, 'draw' => 1] + $params), ['X-Requested-With' => 'XMLHttpRequest']);
+
+        // A sort direction carrying SQL, on a sortable, a computed and an unknown column: the
+        // direction and the column are allowlisted, so the list still loads.
+        $columns = [['data' => 'notes_created_at'], ['data' => 'paid_status'], ['data' => 'no_such_column']];
+        foreach ([0, 1, 2] as $col) {
+            $get(['columns' => $columns, 'order' => [['column' => $col, 'dir' => 'desc, (select 1 from users)']]])
+                ->assertOk()->assertJsonMissingPath('error');
         }
+        // A column name carrying SQL is refused outright (DataTables 12.7 validates names itself).
+        $this->assertNotSame(200, $get(['columns' => [['data' => 'sleep(5)']],
+            'order' => [['column' => 0, 'dir' => 'asc']]])->status());
+
+        // Neither ever reached the database.
+        $this->assertSame([], array_values(array_filter($sql, fn ($q) => stripos($q, 'sleep(') !== false
+            || stripos($q, 'select 1 from users') !== false)));
     }
 
     // ── R-07: inbound SMS webhook ────────────────────────────────────────────
