@@ -56,6 +56,24 @@ class SecurityBatch1Test extends XplogentTestCase
         $this->assertCount(0, $user->roles);
     }
 
+    public function test_an_approved_account_without_a_role_signs_in_to_a_no_access_page(): void
+    {
+        // Until a role is given, PermissionHelper sends the user to route('no-permission'), which
+        // didn't exist: signing in was a 500.
+        $user = User::factory()->create(['email' => 'approved@test.co.uk', 'password' => bcrypt('a-long-password'),
+            'is_active' => 1]);
+        \Illuminate\Support\Facades\DB::table('ip_addresses')->insert(['ip_address' => '127.0.0.1', 'status' => 1,
+            'user_id' => $user->id]);
+        $this->post('/login', ['email' => 'approved@test.co.uk', 'password' => 'a-long-password'])
+            ->assertRedirect(route('no-permission'));
+        $this->assertAuthenticatedAs($user);
+        $this->get('/no-access')->assertOk()->assertSee('No access yet')->assertSee('approved@test.co.uk')
+            ->assertSee('action="' . route('logout') . '"', false);
+        $this->post('/logout')->assertRedirect();
+        $this->assertGuest();
+        $this->get('/no-access')->assertRedirect(route('login'));
+    }
+
     // ── R-02, R-08 – R-11: permissions on controllers that had none ──────────
     public function test_crm_actions_need_crm_access_and_the_money_path_needs_its_own_permission(): void
     {

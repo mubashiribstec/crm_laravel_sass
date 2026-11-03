@@ -45,6 +45,9 @@ Route::get('login', [LoginController::class, 'showLoginForm'])->middleware('gues
 Route::post('login', [LoginController::class, 'login'])->middleware('throttle:5,1');
 // POST only: a GET logout can be triggered by any link or prefetch (R-06).
 Route::post('logout', [LoginController::class, 'logout'])->middleware('auth')->name('logout');
+// Where PermissionHelper::firstAllowedRoute sends a signed-in user with no permission at all
+// (e.g. an approved sign-up without a role yet); the route was missing, so that sign-in was a 500.
+Route::view('no-access', 'auth.no-access')->middleware('auth')->name('no-permission');
 
 Route::get('message_receive', [CommunicationController::class, 'messageReceive']);
 /**This route is using to retrieve messages from openVox */
