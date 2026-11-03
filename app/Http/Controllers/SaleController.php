@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\Xplogent\CandidateQueueService;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
+use App\Support\CvStorage;
 
 use Horsefly\Unit;
 use Horsefly\Office;
@@ -59,12 +60,6 @@ class SaleController extends Controller
         $this->middleware('permission:sale-create')->only(['create', 'store']);
         $this->middleware('permission:sale-create,sale-edit')->only(['getOfficeUnits']);
         $this->middleware('permission:sale-edit')->only(['edit', 'update']);
-        // These had no check: any signed-in account could close, reopen or hold any sale.
-        $this->middleware('permission:sale-change-status,sale-open-change-status,sale-closed-change-status,'
-            . 'sale-direct-change-status,sale-hold-change-status,sale-rejected-change-status,sale-mark-as-open-close')
-            ->only(['changeSaleStatus']);
-        $this->middleware('permission:sale-mark-on-hold,sale-open-mark-on-hold,sale-direct-mark-on-hold,sale-hold-change-status')
-            ->only(['changeSaleHoldStatus']);
         $this->middleware('permission:sale-blacklist')->only(['toggleBlacklist']);
         $this->middleware('permission:sale-view,sale-direct-view,sale-open-view')->only(['show', 'fetchApplicantsWithinSaleRadiusIndex', 'getApplicantsBySaleRadius']);
         $this->middleware('permission:sale-delete')->only(['destroy']);
@@ -4274,36 +4269,8 @@ class SaleController extends Controller
                 return Carbon::parse($applicant->notes_created_at)->format('d M Y, h:i A');
             })
             ->orderColumn('notes_created_at', 'notes_created_at $1') // ✅ direct column name
-            ->addColumn('applicant_resume', function ($applicant) {
-                $path = $applicant->applicant_cv;
-                if ($path && str_starts_with($path, 'uploads/')) {
-                    $fullPath = public_path($path);
-                    if (file_exists($fullPath) && (!$applicant->is_blocked || Gate::allows('applicant-show-blocked-data'))) {
-                        $url = asset($path);
-                        return '<a href="' . $url . '" title="Download CV" target="_blank" class="text-decoration-none">
-                                    <iconify-icon icon="solar:download-square-bold" class="text-success fs-28"></iconify-icon>
-                                </a>';
-                    }
-                }
-                return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                            <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                        </button>';
-            })
-            ->addColumn('crm_resume', function ($applicant) {
-                $path = $applicant->updated_cv;
-                if ($path && str_starts_with($path, 'uploads/')) {
-                    $fullPath = public_path($path);
-                    if (file_exists($fullPath) && (!$applicant->is_blocked || Gate::allows('applicant-show-blocked-data'))) {
-                        $url = asset($path);
-                        return '<a href="' . $url . '" title="Download Updated CV" target="_blank" class="text-decoration-none">
-                                    <iconify-icon icon="solar:download-square-bold" class="text-primary fs-28"></iconify-icon>
-                                </a>';
-                    }
-                }
-                return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                            <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                        </button>';
-            })
+            ->addColumn('applicant_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->applicant_cv, $applicant->is_blocked, 'original', 'success', 'Download CV'))
+            ->addColumn('crm_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->updated_cv, $applicant->is_blocked, 'updated', 'primary', 'Download Updated CV'))
             ->addColumn('paid_status', function ($applicant) use ($sale_id) {
                 $status_value = 'open';
                 $color_class  = 'bg-dark';

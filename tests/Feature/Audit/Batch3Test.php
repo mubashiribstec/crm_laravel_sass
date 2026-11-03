@@ -118,7 +118,7 @@ class Batch3Test extends XplogentTestCase
         $this->assertSame(1, SaleNote::where('sale_id', $sale->id)->where('status', 1)->count());
         $this->assertStringStartsWith('Client wants nights', $sale->fresh()->sale_notes);
 
-        // changeSaleStatus: needs a change-status permission now, and a known status
+        // changeSaleStatus: the existing change-status permission check, and a known status
         $this->actingAs($noter)->postJson('/changeSaleStatus', ['sale_id' => $sale->id, 'status' => 0, 'details' => 'x'])
             ->assertForbidden();
         $manager = $this->staff('Sam Manager', 'sale-change-status', 'sale-mark-on-hold', 'sale-edit');
