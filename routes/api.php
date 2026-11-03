@@ -20,15 +20,19 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 // Auth: Authorization: Bearer <PORTAL_API_TOKEN>  (or X-API-Token / ?api_token=)
 // Same membership rules as SaleController::getOpenSales() (status=1, not on hold).
 Route::get('/sales/open', [ApiController::class, 'openSalesApi'])
+     ->middleware('throttle:60,1')
      ->name('api.sales.open');
 
 Route::get('/sales/open/kingsburypersonnel', [ApiController::class, 'openkingsburypersonnelSalesApi'])
+     ->middleware('throttle:60,1')
      ->name('api.sales.open.kingsbury');    // was a second 'api.sales.open'
 
 Route::get('/sales/details/{id}', [ApiController::class, 'getSaleDetailsApi'])
+     ->middleware('throttle:60,1')
      ->name('api.sales.details');
 
 Route::get('/regions/active', [ApiController::class, 'activeRegionsApi'])
+     ->middleware('throttle:60,1')
      ->name('api.regions.active');
 
 

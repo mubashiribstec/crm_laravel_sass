@@ -311,4 +311,22 @@ class Batch3Test extends XplogentTestCase
         $rej = collect($get('/getRejectedSales', 'sale-rejected-index'))->keyBy('id');
         $this->assertSame([$rejected->id], $rej->keys()->all());
     }
+
+    // ── P-03: the portal feed ────────────────────────────────────────────────
+    public function test_the_portal_feed_returns_everything_by_default_and_pages_on_request(): void
+    {
+        config(['services.portal.token' => 'portal-test-token-0123456789']);
+        foreach (range(1, 3) as $_) {
+            $this->sale();
+        }
+        $auth = ['Authorization' => 'Bearer portal-test-token-0123456789'];
+        $all = $this->getJson('/api/sales/open', $auth)->assertOk()->assertJsonMissingPath('meta')->json('data');
+        $this->assertCount(3, $all);                                          // unchanged for the portal
+        $page = $this->getJson('/api/sales/open?per_page=2&page=2', $auth)->assertOk();
+        $this->assertCount(1, $page->json('data'));
+        $this->assertSame(['current_page' => 2, 'per_page' => 2, 'total' => 3, 'last_page' => 2, 'from' => 3, 'to' => 3],
+            $page->json('meta'));
+        $this->assertSame(100, $this->getJson('/api/sales/open?per_page=5000', $auth)->json('meta.per_page'));
+        $this->assertContains('throttle:60,1', app('router')->getRoutes()->getByName('api.sales.open')->gatherMiddleware());
+    }
 }
