@@ -2,7 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ActionRefusedException;
+use App\Services\Xplogent\ApplicantStatusService;
 use Illuminate\Http\Request;
+use App\Support\CvStorage;
 
 // Import necessary models
 use Horsefly\Sale;
@@ -68,7 +71,6 @@ class ApplicantController extends Controller
         $this->middleware('permission:applicant-delete')->only(['destroy', 'changeStatus']);
         $this->middleware('permission:applicant-export,applicant-export-from-sale-page')->only(['export']);
         $this->middleware('permission:region-export')->only(['regionalApplicatsExport']);
-        $this->middleware('permission:applicant-download-resume')->only(['downloadCv']);
         $this->middleware('permission:applicant-upload-resume')->only(['uploadCv']);
         $this->middleware('permission:applicant-upload-crm-resume')->only(['crmuploadCv']);
         $this->middleware('permission:applicant-add-note')->only(['storeShortNotes', 'markApplicantNoNursingHome']);
@@ -269,48 +271,18 @@ class ApplicantController extends Controller
 
             $applicantData['applicant_notes'] = $applicant_notes = $request->applicant_notes . ' --- By: ' . Auth::user()->name . ' Date: ' . Carbon::now()->format('d-m-Y');
 
-            if ($request->hasFile('applicant_cv')) {
-                // Original name & extension
-                $filenameWithExt = $request->file('applicant_cv')->getClientOriginalName();
-                $filename = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-                $extension = $request->file('applicant_cv')->getClientOriginalExtension();
-
-                // Clean filename
-                $filename = preg_replace('/[\s-]+/', '_', trim($filename));
-
-                // Unique filename
-                $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-
-                // Directory: public/uploads/resume/YYYY/MM/DD
-                $year = now()->year;
-                $month = now()->format('m');
-                $day = now()->format('d');
-
-                $directory = "uploads/resume/{$year}/{$month}/{$day}";
-                $destinationPath = public_path($directory);
-
-                if (!File::exists($destinationPath)) {
-                    File::makeDirectory($destinationPath, 0755, true, true);
-                }
-
-                // Move file to public directory
-                $request->file('applicant_cv')->move($destinationPath, $fileNameToStore);
-
-                // Save relative path in DB (IMPORTANT)
-                $applicantData['applicant_cv'] = $directory . '/' . $fileNameToStore;
-            }
 
             $postcode = preg_replace('/\s+/', '', $request->applicant_postcode); // Remove spaces
 
             // 1. Try to find a match in the full postcodes table first
             $postcode_query = DB::table('postcodes')
-                ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [$postcode])
+                ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [strtolower($postcode)])
                 ->first();
 
             // 2. Fallback: If not found in full postcodes, check outcodes
             if (!$postcode_query) {
                 $postcode_query = DB::table('outcodepostcodes')
-                    ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [$postcode])
+                    ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [strtolower($postcode)])
                     ->first();
             }
 
@@ -341,6 +313,12 @@ class ApplicantController extends Controller
                     'success' => false,
                     'message' => 'Postcode location is required. Please provide a valid postcode.'
                 ], 400);
+            }
+
+            // Stored once the checks above have passed (private storage, random name; served
+            // only through applicants.cv.download).
+            if ($request->hasFile('applicant_cv')) {
+                $applicantData['applicant_cv'] = CvStorage::store($request->file('applicant_cv'));
             }
 
             $applicant = Applicant::create($applicantData);
@@ -477,6 +455,7 @@ class ApplicantController extends Controller
             ]);
         } catch (Exception $e) {
             DB::rollBack();
+            CvStorage::delete($applicantData['applicant_cv'] ?? null);
             Log::error('Error creating applicant: ' . $e->getMessage());
 
             return response()->json([
@@ -1003,54 +982,8 @@ class ApplicantController extends Controller
                 ->editColumn('updated_at', function ($applicant) {
                     return $applicant->formatted_updated_at; // Using accessor
                 })
-                ->addColumn('applicant_resume', function ($applicant) {
-                    $path = $applicant->applicant_cv; // e.g. uploads/cv/file.pdf
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (
-                            file_exists($fullPath) &&
-                            (!$applicant->is_blocked || Gate::allows('applicant-show-blocked-data'))
-                        ) {
-
-                            $url = asset($path); // direct public URL
-
-                            return '<a href="' . $url . '" title="Download CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-success fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
-                ->addColumn('crm_resume', function ($applicant) {
-                    $path = $applicant->updated_cv;
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (
-                            file_exists($fullPath) &&
-                            (!$applicant->is_blocked || Gate::allows('applicant-show-blocked-data'))
-                        ) {
-
-                            $url = asset($path);
-
-                            return '<a href="' . $url . '" title="Download Updated CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-primary fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
+                ->addColumn('applicant_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->applicant_cv, $applicant->is_blocked, 'original', 'success', 'Download CV'))
+                ->addColumn('crm_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->updated_cv, $applicant->is_blocked, 'updated', 'primary', 'Download Updated CV'))
                 ->addColumn('customStatus', function ($applicant) {
                     $status = '';
                     if ($applicant->is_blocked == 1) {
@@ -1196,135 +1129,14 @@ class ApplicantController extends Controller
         try {
             DB::beginTransaction();
 
-            $applicant_id = $request->input('applicant_id');
-            $details = $request->input('details');
-            $notes_reason = $request->input('reason');
-            $applicant_notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
-
-            $updateData = ['applicant_notes' => $applicant_notes];
-            $movedTabTo = '';
-
-            switch ($notes_reason) {
-                case 'blocked':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_no_response' => false,
-                        'is_blocked' => true,
-                        'is_callback_enable' => false,
-                        'is_temp_not_interested' => false,
-                    ]));
-                    $movedTabTo = 'blocked';
-                    break;
-
-                case 'casual':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_no_response' => false,
-                        'is_blocked' => false,
-                        'is_callback_enable' => false,
-                        'is_temp_not_interested' => false,
-                    ]));
-                    $movedTabTo = 'casual';
-                    break;
-
-                case 'no_response':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_circuit_busy' => false,
-                        'is_no_response' => true,
-                        'is_callback_enable' => false,
-                        'is_blocked' => false,
-                        'is_temp_not_interested' => false,
-                    ]));
-                    $movedTabTo = 'no response';
-                    break;
-
-                case 'no_job':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_no_response' => false,
-                        'is_callback_enable' => false,
-                        'is_blocked' => false,
-                        'is_no_job' => true,
-                        'is_temp_not_interested' => false,
-                    ]));
-                    $movedTabTo = 'no job';
-                    break;
-
-                case 'circuit_busy':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_temp_not_interested' => false,
-                        'is_callback_enable' => false,
-                        'is_no_response' => false,
-                        'is_circuit_busy' => true,
-                        'is_blocked' => false,
-                        'is_no_job' => false,
-                    ]));
-                    $movedTabTo = 'circuit busy';
-                    break;
-
-                case 'not_interested':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_temp_not_interested' => true,
-                        'is_no_response' => false,
-                        'is_callback_enable' => false,
-                        'is_circuit_busy' => false,
-                        'is_blocked' => false,
-                        'is_no_job' => false,
-                    ]));
-                    $movedTabTo = 'not interested';
-                    break;
-
-                case 'callback':
-                    Applicant::where('id', $applicant_id)->update(array_merge($updateData, [
-                        'is_temp_not_interested' => false,
-                        'is_callback_enable' => true,
-                        'is_no_response' => false,
-                        'is_circuit_busy' => false,
-                        'is_blocked' => false,
-                        'is_no_job' => false,
-                    ]));
-                    $movedTabTo = 'callback';
-                    break;
-            }
-
-            // Save applicant note
-            $applicantNote = ApplicantNote::create([
-                'details' => $applicant_notes,
-                'applicant_id' => $applicant_id,
-                'moved_tab_to' => $movedTabTo,
-                'user_id' => $user->id,
-            ]);
-
-            $applicantNote->update([
-                'note_uid' => md5($applicantNote->id),
-            ]);
-
-            // Disable previous module notes
-            ModuleNote::where([
-                'module_noteable_id' => $applicant_id,
-                'module_noteable_type' => 'Horsefly\Applicant',
-            ])
-                ->where('status', 1)
-                ->update(['status' => 0]);
-
-            // Add new module note
-            $moduleNote = ModuleNote::create([
-                'details' => $applicant_notes,
-                'module_noteable_id' => $applicant_id,
-                'module_noteable_type' => 'Horsefly\Applicant',
-                'user_id' => $user->id,
-            ]);
-
-            $moduleNote->update([
-                'module_note_uid' => md5($moduleNote->id),
-            ]);
-
-            // Log audit
-            $applicant = Applicant::where('id', $applicant_id)
-                ->select('applicant_name', 'applicant_notes', 'id')
-                ->first();
-
-            Log::info('Updated request for applicant', $applicant->toArray());
-
-            $observer = new ActionObserver();
-            $observer->customApplicantAudit($applicant, 'applicant_notes');
+            // Flags, notes, module note and audit: shared with the Xplogent API
+            // (App\Services\Xplogent\ApplicantStatusService), so both write the same rows.
+            app(ApplicantStatusService::class)->apply(
+                (int) $request->input('applicant_id'),
+                (string) $request->input('reason'),
+                (string) $request->input('details'),
+                $user
+            );
 
             DB::commit();
 
@@ -1334,17 +1146,6 @@ class ApplicantController extends Controller
             Log::error('Failed to store notes: ' . $e->getMessage());
 
             return back()->with('error', 'Something went wrong while saving notes.');
-        }
-    }
-    public function downloadCv(int $id)
-    {
-        $applicant = Applicant::findOrFail($id);
-        $filePath = $applicant->cv_path;
-
-        if (Storage::exists($filePath)) {
-            return Storage::download($filePath);
-        } else {
-            return response()->json(['error' => 'File not found'], 404);
         }
     }
     public function edit(int $id)
@@ -1510,44 +1311,9 @@ class ApplicantController extends Controller
             $path = null;
 
             if ($request->hasFile('applicant_cv')) {
-
-                // 🧹 Delete old CV if exists (public path)
-                if (!empty($applicantData['applicant_cv'])) {
-                    $oldFile = public_path($applicantData['applicant_cv']);
-
-                    if (file_exists($oldFile)) {
-                        unlink($oldFile);
-                    }
-                }
-
-                // 📅 Dynamic directory: public/uploads/resume/YYYY/MM/DD
-                $year = now()->year;
-                $month = now()->format('m');
-                $day = now()->format('d');
-
-                $directory = "uploads/resume/{$year}/{$month}/{$day}";
-                $destinationPath = public_path($directory);
-
-                if (!File::exists($destinationPath)) {
-                    File::makeDirectory($destinationPath, 0755, true, true);
-                }
-
-                // 🧾 Original filename & extension
-                $filenameWithExt = $request->file('applicant_cv')->getClientOriginalName();
-                $filename = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-                $extension = $request->file('applicant_cv')->getClientOriginalExtension();
-
-                // 🔤 Clean filename
-                $filename = preg_replace('/[\s-]+/', '_', trim($filename));
-
-                // 🕒 Unique filename
-                $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-
-                // 🚚 Move file to public directory
-                $request->file('applicant_cv')->move($destinationPath, $fileNameToStore);
-
-                // ✅ Save relative path in DB
-                $path = $directory . '/' . $fileNameToStore;
+                // The old file is removed after the update has been saved (below), so a failed
+                // update never loses the CV it would have replaced.
+                $path = CvStorage::store($request->file('applicant_cv'));
                 $applicantData['applicant_cv'] = $path;
             }
 
@@ -1601,13 +1367,13 @@ class ApplicantController extends Controller
             if ($postcode != preg_replace('/\s+/', '', $applicant->applicant_postcode)) {
                 // 1. Try to find a match in the full postcodes table first
                 $postcode_query = DB::table('postcodes')
-                    ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [$postcode])
+                    ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [strtolower($postcode)])
                     ->first();
 
                 // 2. Fallback: If not found in full postcodes, check outcodes
                 if (!$postcode_query) {
                     $postcode_query = DB::table('outcodepostcodes')
-                        ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [$postcode])
+                        ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [strtolower($postcode)])
                         ->first();
                 }
 
@@ -1623,6 +1389,8 @@ class ApplicantController extends Controller
                         $applicantData['lat'] = $result['lat'];
                         $applicantData['lng'] = $result['lng'];
                     } catch (Exception $e) {
+                        DB::rollBack();
+                        CvStorage::delete($path);                 // the upload that was not used
                         return response()->json([
                             'success' => false,
                             'message' => 'Unable to locate address: ' . $e->getMessage()
@@ -1633,6 +1401,8 @@ class ApplicantController extends Controller
                     $applicantData['lng'] = $postcode_query->lng;
                 }
             }
+
+            $oldCv = $applicant->applicant_cv;
 
             // Update the applicant with the validated and formatted data
             $applicant->update($applicantData);
@@ -1657,6 +1427,10 @@ class ApplicantController extends Controller
 
             DB::commit();
 
+            if ($path !== null && $oldCv && $oldCv !== $path) {
+                CvStorage::delete($oldCv);                        // replaced, and the update is saved
+            }
+
             // Redirect to the applicants page with a success message
             return response()->json([
                 'success' => true,
@@ -1665,6 +1439,7 @@ class ApplicantController extends Controller
             ]);
         } catch (Exception $e) {
             DB::rollBack();
+            CvStorage::delete($path ?? null);
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage()
@@ -1704,122 +1479,59 @@ class ApplicantController extends Controller
     }
     public function uploadCv(Request $request)
     {
-        // Get file and applicant data
-        $applicantId = $request->input('applicant_id');
-
-        // Fetch applicant
-        $applicant = Applicant::findOrFail($applicantId);
-
-        // ✅ Delete old CV if exists (from public directory)
-        if (!empty($applicant->applicant_cv)) {
-            $oldPath = public_path($applicant->applicant_cv);
-            if (file_exists($oldPath)) {
-                unlink($oldPath);
-            }
-        }
-
-        // Directory structure
-        $year = now()->year;
-        $month = now()->format('m');
-        $day = now()->format('d');
-
-        $directory = "uploads/resume/{$year}/{$month}/{$day}";
-        $publicPath = public_path($directory);
-
-        // Ensure directory exists
-        if (!File::exists($publicPath)) {
-            File::makeDirectory($publicPath, 0755, true, true);
-        }
-
-        // Original name & extension
-        $filenameWithExt = $request->file('resume')->getClientOriginalName();
-        $filename = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-        $extension = $request->file('resume')->getClientOriginalExtension();
-
-        // Clean filename
-        $filename = preg_replace('/[\s-]+/', '_', trim($filename));
-
-        // Unique filename
-        $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-
-        // Move file to public directory
-        $request->file('resume')->move($publicPath, $fileNameToStore);
-
-        // Store relative path in DB
-        $filePath = "{$directory}/{$fileNameToStore}";
-
-        // Update applicant
-        $applicant->update([
-            'applicant_cv' => $filePath
+        // Validated like crmuploadCv: without this, any file (a .php script too) was saved
+        // under public/ and could be executed by the web server.
+        $request->validate([
+            'resume' => 'required|file|extensions:pdf,doc,docx,txt|max:10240',
+            'applicant_id' => 'required|integer|exists:applicants,id',
         ]);
+        $applicant = Applicant::findOrFail($request->input('applicant_id'));
+        $filePath = $this->storeCvFile($applicant, 'applicant_cv', $request->file('resume'));
 
         return response()->json([
             'success' => true,
             'message' => 'File uploaded successfully',
             'file_path' => $filePath,
-            'file_url' => asset($filePath),
+            'file_url' => CvStorage::url($applicant->id, 'original'),
         ]);
     }
+
     public function crmuploadCv(Request $request)
     {
-        // ✅ Validate request
         $request->validate([
             'resume' => 'required|file|extensions:pdf,doc,docx,txt|max:10240',
             'applicant_id' => 'required|integer|exists:applicants,id',
         ]);
+        $applicant = Applicant::findOrFail($request->input('applicant_id'));
+        $relativePath = $this->storeCvFile($applicant, 'updated_cv', $request->file('resume'));
 
-        $applicantId = $request->input('applicant_id');
-
-        // 🔎 Get applicant
-        $applicant = Applicant::findOrFail($applicantId);
-
-        // 🧹 Delete old updated CV if exists (PUBLIC PATH)
-        if (!empty($applicant->updated_cv)) {
-            $oldFile = public_path($applicant->updated_cv);
-
-            if (file_exists($oldFile)) {
-                unlink($oldFile);
-            }
-        }
-
-        // 📅 Date-based directory
-        $year = now()->year;
-        $month = now()->format('m');
-        $day = now()->format('d');
-
-        $directory = "uploads/resume/{$year}/{$month}/{$day}";
-        $destinationPath = public_path($directory);
-
-        if (!File::exists($destinationPath)) {
-            File::makeDirectory($destinationPath, 0755, true, true);
-        }
-
-        // Original name & extension
-        $filenameWithExt = $request->file('resume')->getClientOriginalName();
-        $filename = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-        $extension = $request->file('resume')->getClientOriginalExtension();
-
-        // Clean filename
-        $filename = preg_replace('/[\s-]+/', '_', trim($filename));
-
-        // Unique filename
-        $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-
-
-        // 🚚 Move file to public directory
-        $request->file('resume')->move($destinationPath, $fileNameToStore);
-
-        // ✅ Save relative path in DB
-        $relativePath = $directory . '/' . $fileNameToStore;
-        $applicant->update(['updated_cv' => $relativePath]);
-
-        // 📤 Response
         return response()->json([
             'success' => true,
             'message' => 'File uploaded successfully',
             'file_path' => $relativePath,
-            'file_url' => asset($relativePath),
+            'file_url' => CvStorage::url($applicant->id, 'updated'),
         ]);
+    }
+
+    /**
+     * Save an uploaded CV privately (CvStorage), point $column at it, and only then remove
+     * the file it replaces (before, a failed upload lost the old CV).
+     */
+    private function storeCvFile(Applicant $applicant, string $column, \Illuminate\Http\UploadedFile $file): string
+    {
+        $path = CvStorage::store($file);
+        $old = (string) $applicant->{$column};
+        try {
+            $applicant->update([$column => $path]);
+        } catch (\Throwable $e) {
+            CvStorage::delete($path);
+            throw $e;
+        }
+        if ($old !== '' && $old !== $path) {
+            CvStorage::delete($old);
+        }
+
+        return $path;
     }
     public function export(Request $request)
     {
@@ -1896,39 +1608,29 @@ class ApplicantController extends Controller
     }
     public function changeStatus(Request $request)
     {
+        $v = $request->validate([
+            'applicant_id' => 'required|integer|exists:applicants,id',
+            'status' => 'required|in:0,1',               // inactive, active
+            'details' => 'required|string|max:5000',
+        ]);
         $user = Auth::user();
+        $applicantId = (int) $v['applicant_id'];
+        $notes = $v['details'] . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
 
-        $applicant_id = $request->input('applicant_id');
-        $status = $request->input('status');
-        $details = $request->input('details');
-        $notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
+        // One transaction: the old note is only switched off if the status and new note are saved.
+        DB::transaction(function () use ($applicantId, $notes, $user, $v) {
+            Applicant::where('id', $applicantId)->update(['applicant_notes' => $notes, 'status' => (int) $v['status']]);
 
-        $updateData = [
-            'applicant_notes' => $notes,
-            'status' => $status,
-        ];
-
-        Applicant::where('id', $applicant_id)->update($updateData);
-
-        // Disable previous module note
-        ModuleNote::where([
-            'module_noteable_id' => $applicant_id,
-            'module_noteable_type' => 'Horsefly\Applicant'
-        ])
-            ->orderBy('id', 'desc')
-            ->update(['status' => 0]);
-
-        // Create new module note
-        $moduleNote = ModuleNote::create([
-            'details' => $notes,
-            'module_noteable_id' => $applicant_id,
-            'module_noteable_type' => 'Horsefly\Applicant',
-            'user_id' => $user->id
-        ]);
-
-        $moduleNote->update([
-            'module_note_uid' => md5($moduleNote->id)
-        ]);
+            ModuleNote::where(['module_noteable_id' => $applicantId, 'module_noteable_type' => 'Horsefly\Applicant'])
+                ->update(['status' => 0]);
+            $moduleNote = ModuleNote::create([
+                'details' => $notes,
+                'module_noteable_id' => $applicantId,
+                'module_noteable_type' => 'Horsefly\Applicant',
+                'user_id' => $user->id,
+            ]);
+            $moduleNote->update(['module_note_uid' => md5($moduleNote->id)]);
+        });
 
         return redirect()->to(url()->previous());
     }
@@ -2626,18 +2328,21 @@ class ApplicantController extends Controller
                 $sale = Sale::findOrFail($request->input('sale_id'));
 
                 if ($sale->status !== 1) {
-                    throw new Exception("CV can't be sent - the sale is not active.");
+                    throw new ActionRefusedException("CV can't be sent - the sale is not active.");
                 }
 
                 if ($sale->is_on_hold != 0) {
-                    throw new Exception("CV can't be sent - the sale is currently on hold.");
+                    throw new ActionRefusedException("CV can't be sent - the sale is currently on hold.");
                 }
                 
-                if ($sale->is_blacklisted != 0) {
-                    throw new Exception("CV can't be sent - the sale is currently blacklisted.");
+                if ($sale->is_blacklist) {   // was is_blacklisted, which doesn't exist, so the check never fired
+                    throw new ActionRefusedException("CV can't be sent - the sale is currently blacklisted.");
                 }
 
                 $jobTitle = JobTitle::find($sale->job_title_id);
+                if (!$jobTitle) {                   // the vacancy's job title was deleted
+                    throw new ActionRefusedException("CV can't be sent - the vacancy's job title no longer exists.");
+                }
 
                 // Decode related_titles safely and normalize
                 $relatedTitles = is_array($jobTitle->related_titles)
@@ -2656,7 +2361,7 @@ class ApplicantController extends Controller
 
                 // ✅ Check if job titles match
                 if (!in_array((int) $applicant->job_title_id, $jobTitleIds, true)) {
-                    throw new Exception("CV can't be sent - job titles don't match.");
+                    throw new ActionRefusedException("CV can't be sent - job titles don't match.");
                 }
 
                 // 🔹 Handle special conditions
@@ -2684,6 +2389,7 @@ class ApplicantController extends Controller
                 $net_sent_cv_count = $sent_cv_count - $open_cv_count;
 
                 if ($net_sent_cv_count >= $sale->cv_limit) {
+                    DB::rollBack();                 // undo what the handlers above wrote; never leave it open
                     return response()->json([
                         'success' => false,
                         'message' => 'Sorry, you can`t send more CVs for this job. The maximum CV limit has been reached.'
@@ -2692,7 +2398,7 @@ class ApplicantController extends Controller
 
                 // ✅ Check if applicant is rejected
                 if ($this->checkIfApplicantRejected($applicant, $sale->id)) {
-                    throw new Exception("Oops! This applicant has already been quality rejected for the selected position.");
+                    throw new ActionRefusedException("Oops! This applicant has already been quality rejected for the selected position.");
                 }
 
                 // 🔹 Update applicant and create related records
@@ -2726,8 +2432,14 @@ class ApplicantController extends Controller
                     'success' => true,
                     'message' => 'CV successfully sent to quality.'
                 ]);
-            } catch (Exception $e) {
-                // ❌ Rollback the transaction if something fails inside
+            } catch (ActionRefusedException $e) {
+                // A rule refused it (sale closed, on hold, titles don't match…): say why, always.
+                DB::rollBack();
+
+                return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+            } catch (\Throwable $e) {
+                // ❌ Rollback the transaction if something fails inside (Throwable: a PHP Error too,
+                // so the transaction is never left open)
                 DB::rollBack();
 
                 Log::error('Transaction failed in sendCVtoQuality', [
@@ -2965,8 +2677,8 @@ class ApplicantController extends Controller
                 'units.unit_name as unit_name',
                 'users.name as user_name',
 
-                DB::raw("((ACOS(SIN($lat * PI() / 180) * SIN(sales.lat * PI() / 180) + 
-                        COS($lat * PI() / 180) * COS(sales.lat * PI() / 180) * COS(($lon - sales.lng) * PI() / 180)) * 180 / PI()) * 60 * 1.1515) AS distance"),
+                DB::raw("((ACOS(LEAST(1, GREATEST(-1, SIN($lat * PI() / 180) * SIN(sales.lat * PI() / 180) + 
+                        COS($lat * PI() / 180) * COS(sales.lat * PI() / 180) * COS(($lon - sales.lng) * PI() / 180)))) * 180 / PI()) * 60 * 1.1515) AS distance"),
 
                 DB::raw("(SELECT COUNT(*) FROM cv_notes WHERE cv_notes.sale_id = sales.id AND cv_notes.status = 1) AS no_of_sent_cv"),
 
@@ -3432,8 +3144,8 @@ class ApplicantController extends Controller
                 'offices.office_name as office_name',
                 'units.unit_name as unit_name',
                 'users.name as user_name',
-                DB::raw("((ACOS(SIN($lat * PI() / 180) * SIN(sales.lat * PI() / 180) + 
-                        COS($lat * PI() / 180) * COS(sales.lat * PI() / 180) * COS(($lon - sales.lng) * PI() / 180)) * 180 / PI()) * 60 * 1.1515) 
+                DB::raw("((ACOS(LEAST(1, GREATEST(-1, SIN($lat * PI() / 180) * SIN(sales.lat * PI() / 180) + 
+                        COS($lat * PI() / 180) * COS(sales.lat * PI() / 180) * COS(($lon - sales.lng) * PI() / 180)))) * 180 / PI()) * 60 * 1.1515) 
                         AS distance"),
                 DB::raw("(SELECT COUNT(*) FROM cv_notes WHERE cv_notes.sale_id = sales.id AND cv_notes.status = 1) as no_of_sent_cv"),
 

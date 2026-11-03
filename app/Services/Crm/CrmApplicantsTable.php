@@ -42,6 +42,8 @@ class CrmApplicantsTable
         $emailNotificationSetting = Setting::where('key', 'email_notifications')->first();
         $emailTemplateRequestConfiguration = EmailTemplate::where('slug', 'request_configuration_email')->where('is_active', 1)->first();
         $emailTemplateRequestRejected = EmailTemplate::where('slug', 'request_rejected')->where('is_active', 1)->first();
+        // Depends on the user only: checked once, not twice per row.
+        $mayShowBlocked = Gate::allows('applicant-show-blocked-data');
 
         $actionMenu = new CrmActionMenu(
             $tabFilter,
@@ -124,14 +126,13 @@ class CrmApplicantsTable
                 }
                 return $button;
             })
-            ->addColumn('applicantPhone', function ($applicant) {
+            ->addColumn('applicantPhone', function ($applicant) use ($mayShowBlocked) {
 
-                if ($applicant->is_blocked && !Gate::allows('applicant-show-blocked-data')) {
+                if ($applicant->is_blocked && !$mayShowBlocked) {
                     return "<span class='badge bg-dark'>Blocked</span>";
                 }
 
-                $showBlockedData = $applicant->is_blocked
-                    && Gate::allows('applicant-show-blocked-data');
+                $showBlockedData = $applicant->is_blocked && $mayShowBlocked;
 
                 $class = $showBlockedData ? 'show_hidden_phone' : '';
 

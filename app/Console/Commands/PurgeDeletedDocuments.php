@@ -2,11 +2,11 @@
 
 namespace App\Console\Commands;
 
+use App\Support\DocumentStorage;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use Throwable;
 
 class PurgeDeletedDocuments extends Command
@@ -79,12 +79,15 @@ class PurgeDeletedDocuments extends Command
         return self::SUCCESS;
     }
 
+    /**
+     * Deletes the attachment's file, private (storage/app/private/documents) or older public
+     * (public/uploads/docs). DocumentStorage refuses anything outside those folders, "..", and
+     * symlinks leading out of them.
+     */
     private function deleteDocumentFile(string $relativePath): bool
     {
-        $relativePath = str_replace('\\', '/', $relativePath);
-        $segments = explode('/', $relativePath);
-
-        if (!Str::startsWith($relativePath, 'uploads/docs/') || in_array('..', $segments, true)) {
+        $path = DocumentStorage::fullPath($relativePath);
+        if ($path === null) {
             Log::warning('Skipped purging an attachment with an unsafe file path.', [
                 'document_path' => $relativePath,
             ]);
@@ -92,24 +95,13 @@ class PurgeDeletedDocuments extends Command
             return false;
         }
 
-        $path = public_path($relativePath);
         if (!File::exists($path)) {
             return true;
         }
 
-        $docsRoot = realpath(public_path('uploads/docs'));
-        $realPath = realpath($path);
-        if ($docsRoot === false || $realPath === false || !File::isFile($realPath)) {
+        $realPath = DocumentStorage::existingPath($relativePath);
+        if ($realPath === null) {
             Log::warning('Skipped purging an attachment because its file path could not be verified.', [
-                'document_path' => $relativePath,
-            ]);
-
-            return false;
-        }
-
-        $rootPrefix = rtrim($docsRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
-        if (!Str::startsWith(strtolower($realPath), strtolower($rootPrefix))) {
-            Log::warning('Skipped purging an attachment outside the documents directory.', [
                 'document_path' => $relativePath,
             ]);
 

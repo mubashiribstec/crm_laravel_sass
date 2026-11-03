@@ -9,7 +9,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('roles', function (Blueprint $table) {
-            $table->string('type')->nullable()->after('name');
+            if (!Schema::hasColumn('roles', 'type')) {   // guard: a partial migrate or hand-made column (M-08)
+                $table->string('type')->nullable()->after('name');
+            }
         });
     }
 

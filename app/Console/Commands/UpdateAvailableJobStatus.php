@@ -95,11 +95,11 @@ class UpdateAvailableJobStatus extends Command
 
         $location_distance = Sale::selectRaw("
                 *,
-                (ACOS(
+                (ACOS(LEAST(1, GREATEST(-1, 
                     SIN(? * PI() / 180) * SIN(lat * PI() / 180) +
                     COS(? * PI() / 180) * COS(lat * PI() / 180) *
                     COS((? - lng) * PI() / 180)
-                ) * 180 / PI()) * 111.045 AS distance
+                ))) * 180 / PI()) * 111.045 AS distance
             ", [$lat, $lat, $lon])
             ->where("sales.status", 1)
             ->where("sales.is_on_hold", 0)

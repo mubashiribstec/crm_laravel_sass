@@ -478,6 +478,10 @@ class PermissionsTableSeeder extends Seeder
             //settings Permissions
             'show-private-data',
 
+            // Xplogent (AI phone agent) Permissions
+            'xplogent-agent-call',
+            'xplogent-view-transcript',
+
         ];
 
         foreach ($permissions as $permission) {

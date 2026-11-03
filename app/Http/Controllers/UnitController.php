@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Support\DocumentStorage;
 
 use Horsefly\Unit;
 use Horsefly\Office;
@@ -115,7 +116,7 @@ class UnitController extends Controller
             'contact_job_source_id' => 'required|array',
             'contact_job_source_id.*' => 'required|exists:job_sources,id',
             'attachments' => 'nullable|array',
-            'attachments.*' => 'file|max:10240',
+            'attachments.*' => DocumentStorage::rule(),   // documents and images only (N-10)
         ]);
 
         if ($validator->fails()) {
@@ -146,13 +147,13 @@ class UnitController extends Controller
             $postcode = preg_replace('/\s+/', '', $request->unit_postcode);
             // 1. Try to find a match in the full postcodes table first
             $postcode_query = DB::table('postcodes')
-                ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [$postcode])
+                ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [strtolower($postcode)])
                 ->first();
 
             // 2. Fallback: If not found in full postcodes, check outcodes
             if (!$postcode_query) {
                 $postcode_query = DB::table('outcodepostcodes')
-                    ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [$postcode])
+                    ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [strtolower($postcode)])
                     ->first();
             }
 
@@ -231,7 +232,7 @@ class UnitController extends Controller
             Log::error('Error creating unit: ' . $e->getMessage());
 
             DB::rollBack();
-            File::delete(array_map('public_path', $storedDocumentPaths));
+            array_map([DocumentStorage::class, 'delete'], $storedDocumentPaths);
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage()
@@ -707,7 +708,7 @@ class UnitController extends Controller
             'contact_job_source_id' => 'required|array',
             'contact_job_source_id.*' => 'required|exists:job_sources,id',
             'attachments' => 'nullable|array',
-            'attachments.*' => 'file|max:10240',
+            'attachments.*' => DocumentStorage::rule(),   // documents and images only (N-10)
         ]);
 
         // A unit may keep its current (blacklisted) office, but cannot be moved under a blacklisted one.
@@ -758,13 +759,13 @@ class UnitController extends Controller
             if ($postcode != preg_replace('/\s+/', '', $unit->unit_postcode)) {
                 // 1. Try to find a match in the full postcodes table first
                 $postcode_query = DB::table('postcodes')
-                    ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [$postcode])
+                    ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [strtolower($postcode)])
                     ->first();
 
                 // 2. Fallback: If not found in full postcodes, check outcodes
                 if (!$postcode_query) {
                     $postcode_query = DB::table('outcodepostcodes')
-                        ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [$postcode])
+                        ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [strtolower($postcode)])
                         ->first();
                 }
 
@@ -849,7 +850,7 @@ class UnitController extends Controller
         } catch (\Exception $e) {
             Log::error('Error updating unit: ' . $e->getMessage());
             DB::rollBack();
-            File::delete(array_map('public_path', $storedDocumentPaths));
+            array_map([DocumentStorage::class, 'delete'], $storedDocumentPaths);
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while updating the unit. Please try again.'
@@ -879,8 +880,8 @@ class UnitController extends Controller
                 return [
                     'name' => $document->document_name,
                     'size' => $document->document_size,
-                    'mime_type' => File::exists(public_path($document->document_path))
-                        ? mime_content_type(public_path($document->document_path))
+                    'mime_type' => ($file = DocumentStorage::existingPath($document->document_path))
+                        ? mime_content_type($file)
                         : null,
                     'url' => route('units.documents.show', [
                         'id' => $unit->id,
@@ -896,9 +897,9 @@ class UnitController extends Controller
         abort_unless(Gate::any(['unit-view', 'unit-edit']), 403);
 
         $document = Unit::findOrFail($id)->documents()->withTrashed()->findOrFail($documentId);
-        $path = public_path($document->document_path);
+        $path = DocumentStorage::existingPath($document->document_path);
 
-        abort_unless(File::exists($path), 404);
+        abort_unless($path !== null, 404);
 
         $mimeType = mime_content_type($path) ?: 'application/octet-stream';
         if (in_array($mimeType, ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'], true)) {
@@ -937,7 +938,7 @@ class UnitController extends Controller
     public function restoreDocument($id, $documentId)
     {
         $document = Unit::findOrFail($id)->documents()->onlyTrashed()->findOrFail($documentId);
-        abort_unless(File::exists(public_path($document->document_path)), 410, 'The attachment file has already been permanently deleted.');
+        abort_unless(DocumentStorage::exists($document->document_path), 410, 'The attachment file has already been permanently deleted.');
 
         DB::transaction(function () use ($document) {
             $document->delete_reason = null;
@@ -954,16 +955,13 @@ class UnitController extends Controller
 
     private function storeUnitDocuments(Request $request, Unit $unit, array &$storedPaths): void
     {
+        // Private storage, random name, the validated extension (N-10): the file is reachable only
+        // through the permission-checked unit documents route.
         foreach ($request->file('attachments', []) as $attachment) {
+            $extension = strtolower($attachment->getClientOriginalExtension());
             $originalName = $attachment->getClientOriginalName();
             $size = $attachment->getSize();
-            $extension = $attachment->guessExtension();
-            $filename = Str::uuid() . ($extension ? '.' . $extension : '');
-            $dateFolder = Carbon::now()->format('Y/m/d');
-            $directory = public_path('uploads/docs/' . $dateFolder);
-            File::ensureDirectoryExists($directory, 0755, true);
-            $attachment->move($directory, $filename);
-            $path = 'uploads/docs/' . $dateFolder . '/' . $filename;
+            $path = DocumentStorage::store($attachment, $extension);
 
             $storedPaths[] = $path;
             $unit->documents()->create([

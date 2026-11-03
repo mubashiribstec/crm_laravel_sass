@@ -14,8 +14,8 @@ class ApiController extends Controller
     /**
      * JSON API for external portals: all open/active sales.
      *
-     * Mirrors getOpenSales() membership + filters, but returns clean paginated
-     * JSON (no DataTables / HTML columns). By default returns ALL open sales
+     * Mirrors getOpenSales() membership + filters, but returns clean JSON (no DataTables /
+     * HTML columns), paginated only when asked (?page, ?per_page). By default returns ALL open sales
      * (no "last 3 months" date flock) — pass date_flock_filter / date_range_filter
      * to narrow the window.
      *
@@ -178,7 +178,10 @@ class ApiController extends Controller
         $regions = Region::query()
             ->get(['id', 'name', 'districts_code', 'latitude', 'longitude', 'radius']);
 
-        $data = $query->get()->map(function ($sale) use ($regions) {
+        // Opt-in pagination (P-03): ?page= / ?per_page= (max 100). Without them the feed returns every
+        // open sale, as the portal has always received.
+        $paginator = $this->apiPaginator($request, $query);
+        $data = ($paginator ? $paginator->getCollection() : $query->get())->map(function ($sale) use ($regions) {
             $region = $this->resolveSaleRegionByHaversine(
                 $sale->lat !== null ? (float) $sale->lat : null,
                 $sale->lng !== null ? (float) $sale->lng : null,
@@ -210,18 +213,7 @@ class ApiController extends Controller
             ];
         })->values();
 
-        return response()->json([
-            'success' => true,
-            'data' => $data,
-            // 'meta' => [
-            //     'current_page' => $paginator->currentPage(),
-            //     'per_page' => $paginator->perPage(),
-            //     'total' => $paginator->total(),
-            //     'last_page' => $paginator->lastPage(),
-            //     'from' => $paginator->firstItem(),
-            //     'to' => $paginator->lastItem(),
-            // ],
-        ]);
+        return response()->json(['success' => true, 'data' => $data] + $this->apiMeta($paginator));
     }
 
     public function openkingsburypersonnelSalesApi(Request $request)
@@ -381,7 +373,10 @@ class ApiController extends Controller
         $regions = Region::query()
             ->get(['id', 'name', 'districts_code', 'latitude', 'longitude', 'radius']);
 
-        $data = $query->get()->map(function ($sale) use ($regions) {
+        // Opt-in pagination (P-03): ?page= / ?per_page= (max 100). Without them the feed returns every
+        // open sale, as the portal has always received.
+        $paginator = $this->apiPaginator($request, $query);
+        $data = ($paginator ? $paginator->getCollection() : $query->get())->map(function ($sale) use ($regions) {
             $region = $this->resolveSaleRegionByHaversine(
                 $sale->lat !== null ? (float) $sale->lat : null,
                 $sale->lng !== null ? (float) $sale->lng : null,
@@ -413,18 +408,7 @@ class ApiController extends Controller
             ];
         })->values();
 
-        return response()->json([
-            'success' => true,
-            'data' => $data,
-            // 'meta' => [
-            //     'current_page' => $paginator->currentPage(),
-            //     'per_page' => $paginator->perPage(),
-            //     'total' => $paginator->total(),
-            //     'last_page' => $paginator->lastPage(),
-            //     'from' => $paginator->firstItem(),
-            //     'to' => $paginator->lastItem(),
-            // ],
-        ]);
+        return response()->json(['success' => true, 'data' => $data] + $this->apiMeta($paginator));
     }
 
     /**
@@ -987,5 +971,29 @@ class ApiController extends Controller
         }
 
         return array_values(array_filter((array) $value, fn($v) => $v !== '' && $v !== null));
+    }
+
+    /** A paginator when the caller asked for pages (?page / ?per_page, 1–100), else null (the whole list). */
+    private function apiPaginator(Request $request, $query): ?\Illuminate\Contracts\Pagination\LengthAwarePaginator
+    {
+        if (!$request->hasAny(['page', 'per_page'])) {
+            return null;
+        }
+        $perPage = max(1, min(100, (int) $request->input('per_page', 50)));
+
+        return $query->paginate($perPage)->appends($request->query());
+    }
+
+    /** The "meta" block for a paginated reply (none for the whole list). */
+    private function apiMeta(?\Illuminate\Contracts\Pagination\LengthAwarePaginator $paginator): array
+    {
+        return $paginator ? ['meta' => [
+            'current_page' => $paginator->currentPage(),
+            'per_page' => $paginator->perPage(),
+            'total' => $paginator->total(),
+            'last_page' => $paginator->lastPage(),
+            'from' => $paginator->firstItem(),
+            'to' => $paginator->lastItem(),
+        ]] : [];
     }
 }

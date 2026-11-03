@@ -9,15 +9,21 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('offices', function (Blueprint $table) {
-            $table->boolean('is_blacklist')->default(false)->after('status');
+            if (!Schema::hasColumn('offices', 'is_blacklist')) {   // guard (M-08)
+                $table->boolean('is_blacklist')->default(false)->after('status');
+            }
         });
 
         Schema::table('units', function (Blueprint $table) {
-            $table->boolean('is_blacklist')->default(false)->after('status');
+            if (!Schema::hasColumn('units', 'is_blacklist')) {   // guard (M-08)
+                $table->boolean('is_blacklist')->default(false)->after('status');
+            }
         });
 
         Schema::table('sales', function (Blueprint $table) {
-            $table->boolean('is_blacklist')->default(false)->after('status');
+            if (!Schema::hasColumn('sales', 'is_blacklist')) {   // guard (M-08)
+                $table->boolean('is_blacklist')->default(false)->after('status');
+            }
         });
     }
 

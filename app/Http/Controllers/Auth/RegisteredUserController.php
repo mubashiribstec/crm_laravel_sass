@@ -4,10 +4,8 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use Horsefly\User;
-use App\Providers\RouteServiceProvider;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 
 class RegisteredUserController extends Controller
@@ -38,16 +36,21 @@ class RegisteredUserController extends Controller
             'password' => 'required|string|confirmed|min:8',
         ]);
 
+        // New accounts wait for an administrator: inactive, no role, not logged in. Login
+        // (LoginController) refuses inactive users and applies the IP allowlist, so a
+        // sign-up can no longer bypass either. Admins activate them in Users -> Mark as Active.
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
+            'is_active' => 0,
+            'is_admin' => 0,
         ]);
 
         event(new Registered($user));
 
-        Auth::login($user);
-
-        return redirect(RouteServiceProvider::HOME);
+        return redirect()->route('login')->withErrors([
+            'approval' => 'Your account has been created and is waiting for an administrator to approve it.',
+        ]);
     }
 }

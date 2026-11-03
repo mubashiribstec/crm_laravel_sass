@@ -1,0 +1,9 @@
+# Known leak, already public: commit 1db4d49 committed the MySQL root/app DB password in
+# docker-compose.yml and .env.example (audit finding N-01, docs/audit/2026-11-03-audit-review.md).
+# The tracked files were fixed in 9017b46. The password itself MUST be rotated on every machine
+# that used it: ignoring it here only stops CI failing on old history; it does not make it safe.
+# Only these exact findings are ignored; any new leak still fails the "secrets" job.
+1db4d4912f5d903a0eb898ab6513b7ebdd8b5220:docker-compose.yml:generic-api-key:17
+1db4d4912f5d903a0eb898ab6513b7ebdd8b5220:docker-compose.yml:generic-api-key:49
+1db4d4912f5d903a0eb898ab6513b7ebdd8b5220:.env.example:generic-api-key:28
+1db4d4912f5d903a0eb898ab6513b7ebdd8b5220:.env.example:generic-api-key:68

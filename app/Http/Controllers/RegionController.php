@@ -12,6 +12,7 @@ use Horsefly\JobTitle;
 use Horsefly\JobSource;
 use Horsefly\JobCategory;
 use Horsefly\Setting;
+use App\Support\CvStorage;
 
 use App\Support\DialLink;
 
@@ -414,48 +415,8 @@ class RegionController extends Controller
                         return Carbon::parse($applicant->created_at)->format('d M Y, h:i A');
                     }
                 })
-                ->addColumn('applicant_resume', function ($applicant) {
-                    $path = $applicant->applicant_cv; // e.g. uploads/cv/file.pdf
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
-
-                            $url = asset($path); // direct public URL
-
-                            return '<a href="' . $url . '" title="Download CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-success fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
-                ->addColumn('crm_resume', function ($applicant) {
-                    $path = $applicant->updated_cv;
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
-
-                            $url = asset($path);
-
-                            return '<a href="' . $url . '" title="Download Updated CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-primary fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
+                ->addColumn('applicant_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->applicant_cv, $applicant->is_blocked, 'original', 'success', 'Download CV'))
+                ->addColumn('crm_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->updated_cv, $applicant->is_blocked, 'updated', 'primary', 'Download Updated CV'))
                 ->addColumn('customStatus', function ($applicant) {
                     $status = '';
                     if ($applicant->is_blocked == 1) {

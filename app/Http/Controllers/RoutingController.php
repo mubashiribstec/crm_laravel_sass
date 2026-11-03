@@ -40,7 +40,7 @@ class RoutingController extends BaseController
      */
     public function root(Request $request, $first)
     {
-        return view($first);
+        return $this->page($first);
     }
 
     /**
@@ -48,7 +48,7 @@ class RoutingController extends BaseController
      */
     public function secondLevel(Request $request, $first, $second)
     {
-        return view($first . '.' . $second);
+        return $this->page($first . '.' . $second);
     }
 
     /**
@@ -76,7 +76,14 @@ class RoutingController extends BaseController
         }
 
         // Existing logic for other routes
-        $viewName = "$firstLevel.$secondLevel.$thirdLevel";
-        return view($viewName);
+        return $this->page("$firstLevel.$secondLevel.$thirdLevel");
+    }
+
+    /** A theme page by view name; an address with no such view is a 404, not a server error. */
+    private function page(string $name)
+    {
+        abort_unless(view()->exists($name), 404);
+
+        return view($name);
     }
 }

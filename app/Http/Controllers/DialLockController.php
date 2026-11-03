@@ -33,6 +33,13 @@ use Illuminate\Support\Facades\DB;
  */
 class DialLockController extends Controller
 {
+    public function __construct()
+    {
+        // Agents take and release their own locks; seeing and clearing everyone's locks is
+        // the Settings -> Dialing admin tool (it was open to every logged-in user).
+        $this->middleware('permission:administrator-setting-index')->only(['activeList', 'clearLock', 'clearAllLocks']);
+    }
+
     private function dialingSettings(): array
     {
         $rows = Setting::where('group', 'dialing')->pluck('value', 'key');

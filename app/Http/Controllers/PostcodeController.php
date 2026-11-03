@@ -188,9 +188,9 @@ class PostcodeController extends Controller
     {
         $location_distance = Sale::selectRaw("
             *, 
-            (ACOS(SIN(? * PI() / 180) * SIN(lat * PI() / 180) + 
+            (ACOS(LEAST(1, GREATEST(-1, SIN(? * PI() / 180) * SIN(lat * PI() / 180) + 
             COS(? * PI() / 180) * COS(lat * PI() / 180) * 
-            COS((? - lng) * PI() / 180)) * 6371) AS distance
+            COS((? - lng) * PI() / 180)))) * 6371) AS distance
         ", [$lat, $lat, $lon])
             ->having("distance", "<", $radius)  // No need to convert radius anymore
             ->orderBy("distance")

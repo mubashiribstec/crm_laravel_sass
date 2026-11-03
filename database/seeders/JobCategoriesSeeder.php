@@ -24,8 +24,8 @@ class JobCategoriesSeeder extends Seeder
             'is_active' => true,
             ],
             [
-            'name' => 'Speicialist',
-            'description' => 'Speicialist',
+            'name' => 'Specialist',
+            'description' => 'Specialist',
             'is_active' => true,
             ],
             [
@@ -40,14 +40,19 @@ class JobCategoriesSeeder extends Seeder
             ]
         ];
 
-        foreach ($categories as $category) {
-            DB::table('job_categories')->insert([
-                'name' => $category['name'],
-                'description' => $category['description'],
-                'is_active' => $category['is_active'],
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+        // Fix the old misspelling in place, so a database seeded before keeps one category.
+        DB::table('job_categories')->where('name', 'Speicialist')->update(['name' => 'Specialist', 'description' => 'Specialist']);
+
+        foreach ($categories as $category) {          // insert only what is missing: safe to run twice
+            if (!DB::table('job_categories')->where('name', $category['name'])->exists()) {
+                DB::table('job_categories')->insert([
+                    'name' => $category['name'],
+                    'description' => $category['description'],
+                    'is_active' => $category['is_active'],
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
         }
     }
 }

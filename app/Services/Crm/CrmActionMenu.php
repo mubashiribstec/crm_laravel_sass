@@ -201,19 +201,24 @@ class CrmActionMenu
                                     </a></li>';
         }
         if ($this->allows('crm-send-request', [$applicant, $tabFilter])) {
-            $actionButtons .= '
-                                    <li><a class="dropdown-item" 
-                                        href="javascript:void(0);" 
-                                        data-bs-toggle="modal" 
-                                        data-bs-target="#crmSendRequestModal' . (int)$applicant->id . '-' . (int)$applicant->sale_id . '"
+            // Same request dialog as the Sent CV tab (crmSentCvToRequestModal; its modal is rendered
+            // for every row). It used to call crmSendRequestModal(), which doesn't exist, so the item
+            // did nothing (audit N-08). tab=open_cv also moves the open CV on.
+            $actionButtons .= '<li>
+                                        <a class="dropdown-item"
+                                        href="javascript:void(0);"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#crmSentCvToRequestModal' . (int)$applicant->id . '-' . (int)$applicant->sale_id . '"
                                         data-applicant-id="' . (int)$applicant->id . '"
                                         data-sale-id="' . (int)$applicant->sale_id . '"
-                                        data-applicant-phone="' . $applicant->applicant_phone . '" 
-                                        data-applicant-name="' . $applicant->applicant_name . '" 
-                                        data-applicant-unit="' . $applicant->unit_name . '"
-                                        onclick="crmSendRequestModal(' . (int)$applicant->id . ', ' . (int)$applicant->sale_id . ', \'open_cv\', \'' . htmlspecialchars($formattedMessage, ENT_QUOTES) . '\')">
+                                        data-applicant-phone="' . e($applicant->applicant_phone) . '"
+                                        data-applicant-name="' . e($applicant->applicant_name) . '"
+                                        data-applicant-unit="' . e($applicant->unit_name) . '"
+                                        data-sms-message="' . e($formattedMessage) . '"
+                                        onclick="crmSentCvToRequestModal(this, ' . (int)$applicant->id . ', ' . (int)$applicant->sale_id . ', \'open_cv\')">
                                         Send Request
-                                    </a></li>';
+                                        </a>
+                                    </li>';
         }
         if ($this->allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
             $actionButtons .= '<li><a class="dropdown-item" 

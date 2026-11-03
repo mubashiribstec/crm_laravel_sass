@@ -3,4 +3,8 @@ vendor
 .env
 .git
 storage/*.key
-public/storage
+public/storage# CVs and other uploads are data, never part of an image.
+public/uploads
+storage/app/private
+storage/app/public
+storage/logs

@@ -33,6 +33,17 @@
                 </li>
             @endcanany
 
+            @canany(['xplogent-agent-call'])
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ route('xplogent.agent-call') }}">
+                        <span class="nav-icon">
+                            <i class="ri-robot-2-line"></i>
+                        </span>
+                        <span class="nav-text"> Agent Call (AI) </span>
+                    </a>
+                </li>
+            @endcanany
+
             <!-- applicants Menu -->
             @canany(['applicant-index', 'applicant-create'])
                 <li class="nav-item">

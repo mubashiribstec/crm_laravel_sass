@@ -49,9 +49,14 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('crm_notes', fn (Blueprint $t) => $t->dropIndexIfExists('idx_crm_notes_status_tab_applicant_sale'));
-        Schema::table('sent_emails', fn (Blueprint $t) => $t->dropIndexIfExists('idx_sent_emails_applicant_sale_created'));
-        Schema::table('messages', fn (Blueprint $t) => $t->dropIndexIfExists('idx_messages_phone_status_type_created'));
+        // Blueprint has no dropIndexIfExists(): guard with hasIndex so a rollback works.
+        foreach ([
+            ['crm_notes', 'idx_crm_notes_status_tab_applicant_sale'],
+            ['sent_emails', 'idx_sent_emails_applicant_sale_created'],
+            ['messages', 'idx_messages_phone_status_type_created'],
+        ] as [$table, $index]) {
+            \App\Support\SchemaIndex::dropIfExists($table, $index);
+        }
     }
 
     private function indexExists(string $table, string $indexName): bool

@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\ApplicantAgeWindows;
 use Illuminate\Http\Request;
+use App\Support\CvStorage;
 
 use Horsefly\User;
 use Horsefly\Sale;
@@ -82,14 +84,7 @@ class DashboardController extends Controller
     }
     public function getCounts()
     {
-        $now = Carbon::now();
 
-        // Static date calculations
-        $last7DaysStart   = $now->copy()->subDays(16)->startOfDay();
-        $last7DaysEnd     = $now->copy()->endOfDay();
-        $days21Start      = $now->copy()->subDays(37)->startOfDay();
-        $days21End        = $now->copy()->subDays(17)->endOfDay();
-        $cutoffDate       = $now->copy()->subDays(36)->endOfDay();
 
         // Preload counts that are quick
         $applicantQuery = Applicant::where('status', 1)->whereNull('deleted_at');
@@ -159,17 +154,11 @@ class DashboardController extends Controller
             ->whereNotIn('id', $linkedApplicantIds);
 
         // Use clones to avoid re-query building overhead
-        $last7DaysCount = (clone $unlinkedApplicants)
-            ->whereBetween('updated_at', [$last7DaysStart, $last7DaysEnd])
-            ->count();
-
-        $last21DaysCount = (clone $unlinkedApplicants)
-            ->whereBetween('updated_at', [$days21Start, $days21End])
-            ->count();
-
-        $last3MonthsCount = (clone $unlinkedApplicants)
-            ->where('updated_at', '<=', $cutoffDate)
-            ->count();
+        // The same buckets as the Resources tabs these cards are named after (they were a day
+        // off for 21 days, and "3 months" counted everything older than 36 days).
+        $last7DaysCount = ApplicantAgeWindows::apply(clone $unlinkedApplicants, 'updated_at', 'last-7-days')->count();
+        $last21DaysCount = ApplicantAgeWindows::apply(clone $unlinkedApplicants, 'updated_at', 'last-21-days')->count();
+        $last3MonthsCount = ApplicantAgeWindows::apply(clone $unlinkedApplicants, 'updated_at', 'last-3-months')->count();
 
         return response()->json([
             'applicantsCount'  => $applicantsCount,
@@ -3515,48 +3504,8 @@ class DashboardController extends Controller
                 ->editColumn('show_created_at', function ($applicant) {
                     return $applicant->notes_created_at ? Carbon::parse($applicant->notes_created_at)->format('d M Y, g:i A') : '-';
                 })
-                ->addColumn('applicant_resume', function ($applicant) {
-                    $path = $applicant->applicant_cv; // e.g. uploads/cv/file.pdf
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
-
-                            $url = asset($path); // direct public URL
-
-                            return '<a href="' . $url . '" title="Download CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-success fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
-                ->addColumn('crm_resume', function ($applicant) {
-                    $path = $applicant->updated_cv;
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (!$applicant->is_blocked && file_exists($fullPath)  || Gate::allows('applicant-show-blocked-data')) {
-
-                            $url = asset($path);
-
-                            return '<a href="' . $url . '" title="Download Updated CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-primary fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
+                ->addColumn('applicant_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->applicant_cv, $applicant->is_blocked, 'original', 'success', 'Download CV'))
+                ->addColumn('crm_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->updated_cv, $applicant->is_blocked, 'updated', 'primary', 'Download Updated CV'))
                 ->addColumn('action', function ($applicant) {
                     $html = '';
                     $html .= '<div class="btn-group dropstart">

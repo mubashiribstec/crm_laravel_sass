@@ -8,6 +8,12 @@ use Illuminate\Support\Facades\DB;
 
 class FreePBXController extends Controller
 {
+    public function __construct()
+    {
+        // Call-detail records from the PBX: admins only (there was no check at all).
+        $this->middleware('permission:administrator-setting-index');
+    }
+
     public function index()
     {
         return view('freepbx.cdrs');

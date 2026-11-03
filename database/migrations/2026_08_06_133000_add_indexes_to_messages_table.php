@@ -50,12 +50,15 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('messages', function (Blueprint $table) {
-            $table->dropIndexIfExists('idx_messages_module_type_id_id');
-            $table->dropIndexIfExists('idx_messages_module_status_read');
-            $table->dropIndexIfExists('idx_messages_phone_id');
-            $table->dropIndexIfExists('idx_messages_user_module_type');
-        });
+        // Blueprint has no dropIndexIfExists(): guard with hasIndex so a rollback works.
+        foreach ([
+            ['messages', 'idx_messages_module_type_id_id'],
+            ['messages', 'idx_messages_module_status_read'],
+            ['messages', 'idx_messages_phone_id'],
+            ['messages', 'idx_messages_user_module_type'],
+        ] as [$table, $index]) {
+            \App\Support\SchemaIndex::dropIfExists($table, $index);
+        }
     }
 
     /**

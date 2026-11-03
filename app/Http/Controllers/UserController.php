@@ -298,13 +298,14 @@ class UserController extends Controller
                     // STATUS
                     if ($key === 'status' && !empty($statusMap)) {
                         return '<span class="badge bg-primary">'
-                            . ($statusMap[$value] ?? $value)
+                            . e($statusMap[$value] ?? $value)
                             . '</span>';
                     }
 
-                    // URL
-                    if (filter_var($value, FILTER_VALIDATE_URL)) {
-                        return "<a href='{$value}' target='_blank' class='btn btn-sm btn-primary'>Open</a>";
+                    // URL: web links only, escaped. FILTER_VALIDATE_URL alone accepts quotes and
+                    // javascript:// links, and these values are whatever a user saved (audit N-12).
+                    if (is_string($value) && preg_match('#^https?://#i', $value) && filter_var($value, FILTER_VALIDATE_URL)) {
+                        return '<a href="' . e($value) . '" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-primary">Open</a>';
                     }
 
                     // DATE (strict pattern check first)
@@ -315,7 +316,10 @@ class UserController extends Controller
                         }
                     }
 
-                    return strip_tags((string) $value, $allowedTags);
+                    // The allowed formatting tags, without attributes (strip_tags keeps
+                    // onmouseover=... and the like on the tags it allows).
+                    return preg_replace('#<(/?)(b|strong|i|em|br|ul|ol|li)\b[^>]*>#i', '<$1$2>',
+                        strip_tags((string) $value, $allowedTags));
                 };
 
                 $rows = '';

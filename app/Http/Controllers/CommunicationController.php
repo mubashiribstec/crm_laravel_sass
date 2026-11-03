@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Xplogent\VacancyEmailService;
 use Illuminate\Http\Request;
 use Horsefly\Sale;
 use Horsefly\Unit;
@@ -77,37 +78,12 @@ class CommunicationController extends Controller
 
         $user_name = Auth::user()->name;
 
-        $category = ($JobCategory ? ucwords($JobCategory->name) : '-');
-        $unit_name = ($unit ? $unit->unit_name : '-');
-        $salary = $sale->salary ?? '-';
-        $qualification = $sale->qualification ?? '-';
-        $job_type = $sale->position_type ?? '-';
-        $timing = $sale->timing ?? '-';
-        $experience = $sale->experience ?? '-';
-        $location = '-';
-
-        // Fill template placeholders
-        $replace = [
-            $user_name,
-            optional($JobCategory)->name ?? '-',
-            optional($unit)->unit_name ?? '-',
-            $sale->salary ?? '-',
-            $sale->qualification ?? '-',
-            $sale->position_type ?? '-',
-            $sale->timing ?? '-',
-            $sale->experience ?? '-',
-            '-',
-        ];
-        $prev_val = ['(agent_name)', '(job_category)', '(unit_name)', '(salary)', '(qualification)', '(job_type)', '(timing)', '(experience)', '(location)'];
-
+        // Template filling shared with the Xplogent API (App\Services\Xplogent\VacancyEmailService).
         $formattedMessage = '';
         $subject = '';
-
-        $template = EmailTemplate::where('slug', 'send_job_vacancy_details')->where('is_active', 1)->first();
-        if ($template && !empty($template->template)) {
-            $newPhrase = str_replace($prev_val, $replace, $template->template);
-            $formattedMessage = nl2br($newPhrase);
-            $subject = $template->subject;
+        if ($filled = app(VacancyEmailService::class)->fill($sale, $user_name)) {
+            $formattedMessage = $filled['body'];
+            $subject = $filled['subject'];
         }
 
         return view('emails.send-email-to-applicant', compact('sale', 'unit', 'subject', 'formattedMessage', 'emails'));
@@ -121,8 +97,8 @@ class CommunicationController extends Controller
                 lng,
                 applicant_email,
                 applicant_email_secondary,
-                ((ACOS(SIN($lat * PI() / 180) * SIN(lat * PI() / 180) + 
-                COS($lat * PI() / 180) * COS(lat * PI() / 180) * COS(($lon - lng) * PI() / 180)) * 180 / PI()) * 60 * 1.852) AS distance
+                ((ACOS(LEAST(1, GREATEST(-1, SIN($lat * PI() / 180) * SIN(lat * PI() / 180) + 
+                COS($lat * PI() / 180) * COS(lat * PI() / 180) * COS(($lon - lng) * PI() / 180)))) * 180 / PI()) * 60 * 1.852) AS distance
             "))
             ->having("distance", "<", $radius)
             ->orderBy("distance")
@@ -131,8 +107,12 @@ class CommunicationController extends Controller
             ->where('applicants.is_blocked', false)
             ->where('applicants.is_callback_enable', false)
             ->where('applicants.is_no_job', false)
-            ->where("job_category_id", $job_category_id)
-            ->orWhere("job_title_id", $job_title_id)
+            // Grouped: an ungrouped orWhere here cancelled the status / blocked /
+            // no-job / callback filters above, so blocked applicants were emailed.
+            ->where(function ($q) use ($job_category_id, $job_title_id) {
+                $q->where("job_category_id", $job_category_id)
+                    ->orWhere("job_title_id", $job_title_id);
+            })
             ->whereNotNull('applicant_email')
             ->get();
 
@@ -454,17 +434,30 @@ class CommunicationController extends Controller
     /*************************************** */
     public function messageReceive(Request $request)
     {
-        Log::info('Received message: ' . json_encode($request)); // Log the incoming request for debugging
+        // The gateway's URL carries a shared secret (?token=...). This route is outside the
+        // login, and anyone who found it could add messages to any applicant.
+        $expected = (string) config('services.sms_webhook.token');
+        if ($expected === '' || !hash_equals($expected, (string) $request->query('token', ''))) {
+            Log::warning('message_receive refused: ' . ($expected === '' ? 'SMS_WEBHOOK_TOKEN is not set' : 'bad token'));
+            return response()->json(['message' => 'forbidden'], 403);
+        }
+        // Metadata only: no message text or full phone numbers in the logs.
+        Log::info('Received SMS', ['from_tail' => substr((string) $request->input('phoneNumber'), -4),
+            'length' => strlen((string) $request->input('message'))]);
         try {
-            $phoneNumber_gsm = $request->input('phoneNumber');
+            $phoneNumber_gsm = (string) $request->input('phoneNumber');
             $phoneNumber = preg_replace('/^(\+44|44)/', '0', $phoneNumber_gsm);
-            $message = $request->input('message');
-            $msg_id = substr(md5(time()), 0, 14);
-            $date_time = $request->input('time');
-            $date_time_arr = explode(" ", $date_time);
-            $date_res = $date_time_arr[0];
-            $date = str_replace("/", "-", $date_res);
-            $time = $date_time_arr[1];
+            $message = (string) $request->input('message');
+            $msg_id = substr(md5(uniqid('', true)), 0, 14);
+            // "dd/mm/yyyy HH:MM:SS" from the gateway; a missing or odd value falls back to now.
+            $date_time_arr = explode(' ', trim((string) $request->input('time')), 2);
+            $date = str_replace('/', '-', $date_time_arr[0] ?? '');
+            $time = $date_time_arr[1] ?? '';
+            try {
+                $receivedAt = Carbon::parse(trim($date . ' ' . $time));
+            } catch (\Throwable) {
+                $receivedAt = now();
+            }
 
             $data = [];
 
@@ -499,10 +492,11 @@ class CommunicationController extends Controller
                 $applicant_msg->msg_id = $msg_id;
                 $applicant_msg->message = $message;
                 $applicant_msg->phone_number = $phoneNumber;
-                $applicant_msg->date = $date;
-                $applicant_msg->time = $time;
-                $applicant_msg->created_at = Carbon::parse($date . '' . $time)->toDateTimeString();
-                $applicant_msg->updated_at = Carbon::parse($date . '' . $time)->toDateTimeString();
+                // Parsed values: the DATE/TIME columns reject the gateway's raw "dd-mm-yyyy".
+                $applicant_msg->date = $receivedAt->toDateString();
+                $applicant_msg->time = $receivedAt->format('H:i:s');
+                $applicant_msg->created_at = $receivedAt->toDateTimeString();
+                $applicant_msg->updated_at = $receivedAt->toDateTimeString();
                 $applicant_msg->status = 'incoming';
                 $applicant_msg->save();
 
@@ -511,7 +505,8 @@ class CommunicationController extends Controller
                 return response()->json(['message' => 'Phone number not found in Applicant'], 404);
             }
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Failed to save message: ' . $e->getMessage()], 500);
+            Log::error('message_receive failed: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to save message'], 500);
         }
     }
     public function sendChatBoxMsg(Request $request)

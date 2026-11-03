@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Xplogent\CandidateQueueService;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
+use App\Support\CvStorage;
 
 use Horsefly\Unit;
 use Horsefly\Office;
@@ -640,15 +642,15 @@ class SaleController extends Controller
     {
         // Validation
         $validator = Validator::make($request->all(), [
-            'office_id' => 'required',
-            'unit_id' => 'required',
+            'office_id' => 'required|integer|exists:offices,id',
+            'unit_id' => 'required|integer|exists:units,id',
             'sale_postcode' => 'required|string',
-            'job_category_id' => 'required',
-            'job_title_id' => 'required',
-            'job_source_id' => 'required',
-            'job_type' => 'required',
-            'position_type' => 'required',
-            'cv_limit' => 'required',
+            'job_category_id' => 'required|integer|exists:job_categories,id',
+            'job_title_id' => 'required|integer|exists:job_titles,id',
+            'job_source_id' => 'required|integer|exists:job_sources,id',
+            'job_type' => 'required|string|max:50',
+            'position_type' => 'required|string|max:50',
+            'cv_limit' => 'required|integer|min:1|max:127',     // tinyInteger; 0 would block Send CV everywhere
             'timing' => 'required',
             'experience' => 'required',
             'salary' => 'required',
@@ -743,13 +745,13 @@ class SaleController extends Controller
             $postcode = preg_replace('/\s+/', '', $request->sale_postcode);
             // 1. Try to find a match in the full postcodes table first
             $postcode_query = DB::table('postcodes')
-                ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [$postcode])
+                ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [strtolower($postcode)])
                 ->first();
 
             // 2. Fallback: If not found in full postcodes, check outcodes
             if (!$postcode_query) {
                 $postcode_query = DB::table('outcodepostcodes')
-                    ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [$postcode])
+                    ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [strtolower($postcode)])
                     ->first();
             }
 
@@ -864,7 +866,7 @@ class SaleController extends Controller
     }
     public function edit($id, Request $request)
     {
-        $sale = Sale::with('documents')->find($id);
+        $sale = Sale::with('documents')->findOrFail($id);      // an unknown id is a 404, not a crash
 
         if ($sale->status == 4) {
             $offices = Office::where('status', 4)
@@ -918,15 +920,15 @@ class SaleController extends Controller
         // Validation
         $validator = Validator::make($request->all(), [
             'sale_id' => 'required|exists:sales,id',
-            'office_id' => 'required',
-            'unit_id' => 'required',
+            'office_id' => 'required|integer|exists:offices,id',
+            'unit_id' => 'required|integer|exists:units,id',
             'sale_postcode' => 'required|string',
-            'job_category_id' => 'required',
-            'job_title_id' => 'required',
-            'job_source_id' => 'required',
-            'job_type' => 'required',
-            'position_type' => 'required',
-            'cv_limit' => 'required',
+            'job_category_id' => 'required|integer|exists:job_categories,id',
+            'job_title_id' => 'required|integer|exists:job_titles,id',
+            'job_source_id' => 'required|integer|exists:job_sources,id',
+            'job_type' => 'required|string|max:50',
+            'position_type' => 'required|string|max:50',
+            'cv_limit' => 'required|integer|min:1|max:127',     // tinyInteger; 0 would block Send CV everywhere
             'timing' => 'required',
             'experience' => 'required',
             'salary' => 'required',
@@ -1047,13 +1049,13 @@ class SaleController extends Controller
             if ($postcode != preg_replace('/\s+/', '', $sale->sale_postcode)) {
                 // 1. Try to find a match in the full postcodes table first
                 $postcode_query = DB::table('postcodes')
-                    ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [$postcode])
+                    ->whereRaw("LOWER(REPLACE(postcode, ' ', '')) = ?", [strtolower($postcode)])
                     ->first();
 
                 // 2. Fallback: If not found in full postcodes, check outcodes
                 if (!$postcode_query) {
                     $postcode_query = DB::table('outcodepostcodes')
-                        ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [$postcode])
+                        ->whereRaw("LOWER(REPLACE(outcode, ' ', '')) = ?", [strtolower($postcode)])
                         ->first();
                 }
 
@@ -1788,9 +1790,10 @@ class SaleController extends Controller
         $officeFilter = $request->input('office_filter', ''); // Default is empty (no filter)
         $userFilter = $request->input('user_filter', ''); // Default is empty (no filter)
 
-        // Subquery to get the latest audit (open_date) for each sale
-        $latestAuditSub = DB::table('audits')
-            ->select(DB::raw('MAX(id) as id'))
+        // The latest "opened" audit per sale (open_date), as one derived table joined by id, the
+        // getSales pattern (P-02), instead of an IN (MAX(id) … GROUP BY) evaluated in the join.
+        $latestOpenAudit = DB::table('audits')
+            ->selectRaw('MAX(id) AS id, auditable_id')
             ->where('auditable_type', 'Horsefly\Sale')
             ->where('message', 'like', '%sale-opened%')
             ->groupBy('auditable_id');
@@ -1803,29 +1806,23 @@ class SaleController extends Controller
                 'offices.office_name as office_name',
                 'units.unit_name as unit_name',
                 'users.name as user_name',
-                'audits.created_at as open_date'
+                'open_audits.created_at as open_date'
             ])
             ->leftJoin('job_titles', 'sales.job_title_id', '=', 'job_titles.id')
             ->leftJoin('job_categories', 'sales.job_category_id', '=', 'job_categories.id')
             ->leftJoin('offices', 'sales.office_id', '=', 'offices.id')
             ->leftJoin('units', 'sales.unit_id', '=', 'units.id')
             ->leftJoin('users', 'sales.user_id', '=', 'users.id')
-            // Join only the latest audit for each sale
-            ->leftJoin('audits', function ($join) use ($latestAuditSub) {
-                $join->on('audits.auditable_id', '=', 'sales.id')
-                    ->where('audits.auditable_type', '=', 'Horsefly\Sale')
-                    ->where('audits.message', 'like', '%sale-opened%')
-                    ->whereIn('audits.id', $latestAuditSub);
-            })
-            ->with(['jobTitle', 'jobCategory', 'unit', 'office', 'user'])
+            // Join only the latest "opened" audit for each sale
+            ->leftJoinSub($latestOpenAudit, 'latest_open_audit_ids', 'latest_open_audit_ids.auditable_id', '=', 'sales.id')
+            ->leftJoin('audits as open_audits', 'open_audits.id', '=', 'latest_open_audit_ids.id')
+            ->with(['jobTitle', 'jobCategory'])      // the only relations the rows use (the rest are joined)
             ->where('sales.status', 1)
             ->whereNull('sales.deleted_at')
             ->where('sales.is_on_hold', 0)
-            ->where(function ($query) {
-                $query->whereNotNull('audits.id')
-                    ->orWhereNull('audits.id');
-            })
-            ->selectRaw(DB::raw("(SELECT COUNT(*) FROM cv_notes WHERE cv_notes.sale_id = sales.id AND cv_notes.status = 1) as no_of_sent_cv"));
+            ->leftJoinSub(DB::table('cv_notes')->selectRaw('sale_id, COUNT(*) AS cv_count')->where('status', 1)->groupBy('sale_id'),
+                'cv_counts', 'cv_counts.sale_id', '=', 'sales.id')   // one grouped count, not a subquery per row
+            ->addSelect(DB::raw('COALESCE(cv_counts.cv_count, 0) AS no_of_sent_cv'));
 
         $hidePrivateDataSetting = Setting::where('key', 'hide_private_data')->value('value');
 
@@ -1966,7 +1963,7 @@ class SaleController extends Controller
 
             $model->where(function ($query) use ($start_date, $end_date) {
                 $query->whereBetween('sales.updated_at', [$start_date, $end_date])
-                    ->orWhereBetween('audits.created_at', [$start_date, $end_date]);
+                    ->orWhereBetween('open_audits.created_at', [$start_date, $end_date]);
             });
         }
 
@@ -2183,13 +2180,11 @@ class SaleController extends Controller
         $userFilter = $request->input('user_filter', ''); // Default is empty (no filter)
 
         // Subquery to get the latest audit (open_date) for each sale
-        $latestAuditSub = DB::table('audits')
-            ->select(DB::raw('MAX(id) as id'))->where('auditable_type', 'Horsefly\\Sale')
+        // The latest "rejected" audit per sale, as one derived table joined by id (P-02).
+        $latestRejectAudit = DB::table('audits')
+            ->selectRaw('MAX(id) AS id, auditable_id')
+            ->where('auditable_type', 'Horsefly\\Sale')
             ->whereIn('message', ['sale-rejected', 'reject'])
-            ->whereIn('auditable_id', function ($query) {
-                $query->select('id')
-                    ->from('sales'); // Ensure we only consider rejected sales
-            })
             ->groupBy('auditable_id');
 
         $model = Sale::query()
@@ -2200,7 +2195,7 @@ class SaleController extends Controller
                 'offices.office_name as office_name',
                 'units.unit_name as unit_name',
                 'users.name as user_name',
-                'audits.created_at as rejected_date'
+                'rejected_audits.created_at as rejected_date'
             ])
             ->where('sales.status', 3) // rejected sales
             ->whereNull('sales.deleted_at')
@@ -2210,13 +2205,10 @@ class SaleController extends Controller
             ->leftJoin('offices', 'sales.office_id', '=', 'offices.id')
             ->leftJoin('units', 'sales.unit_id', '=', 'units.id')
             ->leftJoin('users', 'sales.user_id', '=', 'users.id')
-            // Join only the latest audit for each sale
-            ->leftJoin('audits', function ($join) use ($latestAuditSub) {
-                $join->on('audits.auditable_id', '=', 'sales.id')->where('audits.auditable_type', '=', 'Horsefly\\Sale')
-                    ->whereIn('message', ['sale-rejected', 'reject'])
-                    ->whereIn('audits.id', $latestAuditSub);
-            })
-            ->with(['jobTitle', 'jobCategory', 'unit', 'office', 'user'])
+            // Join only the latest "rejected" audit for each sale
+            ->leftJoinSub($latestRejectAudit, 'latest_reject_audit_ids', 'latest_reject_audit_ids.auditable_id', '=', 'sales.id')
+            ->leftJoin('audits as rejected_audits', 'rejected_audits.id', '=', 'latest_reject_audit_ids.id')
+            ->with(['jobTitle', 'jobCategory'])      // the only relations the rows use (the rest are joined)
             ->leftJoin(DB::raw("
                 (SELECT sale_id, MAX(id) AS latest_id
                 FROM sale_notes
@@ -2225,7 +2217,9 @@ class SaleController extends Controller
 
             // Join the actual sale_notes record
             ->leftJoin('sale_notes AS updated_notes', 'updated_notes.id', '=', 'latest_notes.latest_id')
-            ->selectRaw(DB::raw("(SELECT COUNT(*) FROM cv_notes WHERE cv_notes.sale_id = sales.id AND cv_notes.status = 1) as no_of_sent_cv"));
+            ->leftJoinSub(DB::table('cv_notes')->selectRaw('sale_id, COUNT(*) AS cv_count')->where('status', 1)->groupBy('sale_id'),
+                'cv_counts', 'cv_counts.sale_id', '=', 'sales.id')   // one grouped count, not a subquery per row
+            ->addSelect(DB::raw('COALESCE(cv_counts.cv_count, 0) AS no_of_sent_cv'));
 
         $hidePrivateDataSetting = Setting::where('key', 'hide_private_data')->value('value');
 
@@ -4018,44 +4012,11 @@ class SaleController extends Controller
             return response()->json(['error' => 'Sale location coordinates are missing.'], 422);
         }
 
-        $lat = (float) $sale->lat;
-        $lng = (float) $sale->lng;
-
-        // --- Resolve which job_title_ids applicants must match ---
-        // Always includes the sale's own title. If that title has related_titles
-        // (JSON array or comma-separated string), those are merged in too.
-        $titleIds = collect([$sale->job_title_id]);
-
-        if ($sale->jobTitle && !empty($sale->jobTitle->related_titles)) {
-            $raw = $sale->jobTitle->related_titles;
-
-            // Normalize into a plain array of title names, regardless of stored format
-            if (is_array($raw)) {
-                $relatedNames = $raw;
-            } else {
-                $decoded = json_decode($raw, true);
-                $relatedNames = is_array($decoded)
-                    ? $decoded
-                    : array_filter(array_map('trim', explode(',', $raw)));
-            }
-
-            if (!empty($relatedNames)) {
-                $relatedIds = JobTitle::whereIn('name', $relatedNames)->pluck('id');
-                $titleIds = $titleIds->merge($relatedIds);
-            }
-        }
-
-        $titleIds = $titleIds
-            ->filter() // drop null/empty
-            ->map(fn($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
-
         $filters = [
             'status_filter'    => $request->input('status_filter', ''),
             'cv_status_filter' => $request->input('cv_status_filter', ''),
             'source_filter'    => $request->input('source_filter', []),
+            'title_filter'     => $request->input('title_filter', []),   // the ticked titles (was dropped)
             'category_id'      => $sale->job_category_id,
         ];
 
@@ -4063,25 +4024,10 @@ class SaleController extends Controller
             ->where('status', 1)
             ->count();
 
-        $latestModuleNoteSub = DB::table('module_notes')
-            ->select('module_noteable_id', 'details', 'created_at')
-            ->where('module_noteable_type', Applicant::class)
-            ->whereIn('id', function ($query) {
-                $query->select(DB::raw('MAX(id)'))
-                    ->from('module_notes')
-                    ->where('module_noteable_type', Applicant::class)
-                    ->groupBy('module_noteable_id');
-            });
-
-        $latestApplicantNoteSub = DB::table('applicant_notes')
-            ->select('applicant_id', 'details', 'created_at')
-            ->whereIn('id', function ($query) {
-                $query->select(DB::raw('MAX(id)'))
-                    ->from('applicant_notes')
-                    ->groupBy('applicant_id');
-            });
-
-        $model = Applicant::query()
+        // The candidate query is shared with the Xplogent campaign queue
+        // (App\Services\Xplogent\CandidateQueueService): title + related titles,
+        // base filters, haversine radius, list filters and the latest note.
+        $model = app(CandidateQueueService::class)->radiusQuery($sale, $radius, $filters)
             ->with([
                 'cv_notes' => fn($q) => $q
                     ->select('id', 'applicant_id', 'sale_id', 'status', 'created_at')
@@ -4090,33 +4036,6 @@ class SaleController extends Controller
                 'jobCategory:id,name',
                 'jobSource:id,name',
             ])
-            ->select([
-                'applicants.*',
-                'job_titles.name as job_title_name',
-                'job_categories.name as job_category_name',
-                'job_sources.name as job_source_name',
-                DB::raw('COALESCE(latest_module_notes.details, latest_applicant_notes.details) AS notes_details'),
-                DB::raw('COALESCE(latest_module_notes.created_at, latest_applicant_notes.created_at, applicants.updated_at) AS notes_created_at'),
-            ])
-            ->leftJoinSub($latestModuleNoteSub, 'latest_module_notes', function ($join) {
-                $join->on('applicants.id', '=', 'latest_module_notes.module_noteable_id');
-            })
-            ->leftJoinSub($latestApplicantNoteSub, 'latest_applicant_notes', function ($join) {
-                $join->on('applicants.id', '=', 'latest_applicant_notes.applicant_id');
-            })
-            ->leftJoin('job_titles', 'applicants.job_title_id', '=', 'job_titles.id')
-            ->leftJoin('job_categories', 'applicants.job_category_id', '=', 'job_categories.id')
-            ->leftJoin('job_sources', 'applicants.job_source_id', '=', 'job_sources.id')
-            ->where('applicants.status', 1)
-            ->whereNull('applicants.deleted_at')
-            ->where('applicants.is_in_nurse_home', 0)
-            ->whereNotNull('applicants.lat')
-            ->whereNotNull('applicants.lng')
-            ->whereIn('applicants.job_title_id', $titleIds) // <-- sale's title + related titles, not user-selectable
-            ->whereRaw(
-                '(6371 * acos(cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))) <= ?',
-                [$lat, $lng, $lat, $radius]
-            )
             ->selectRaw("
             CASE
                 WHEN applicants.paid_status = 'close' THEN 1
@@ -4128,27 +4047,30 @@ class SaleController extends Controller
             END AS paid_status_order
         ", [$sale_id, $sale_id]);
 
-        // Title / category / source / Open-Sent status filters
-        $this->applyRadiusApplicantFilters($model, $sale_id, $filters, false);
-
-        // Sorting logic
+        // Sorting logic. The direction went raw into orderByRaw (SQL injection) and any
+        // column name reached orderBy (most of the table's columns aren't real query columns,
+        // so sorting them failed). Both are allowlisted now.
         if ($request->has('order')) {
-            $orderColumn    = $request->input('columns.' . $request->input('order.0.column') . '.data');
-            $orderDirection = $request->input('order.0.dir', 'desc');
+            $orderColumn    = (string) $request->input('columns.' . $request->input('order.0.column') . '.data');
+            $orderDirection = strtolower((string) $request->input('order.0.dir')) === 'asc' ? 'asc' : 'desc';
+            $sortable = [
+                'job_source' => 'applicants.job_source_id',
+                'job_category' => 'applicants.job_category_id',
+                'job_title' => 'applicants.job_title_id',
+                'applicant_name' => 'applicants.applicant_name',
+                'applicant_email' => 'applicants.applicant_email',
+                'applicant_postcode' => 'applicants.applicant_postcode',
+                'applicant_experience' => 'applicants.applicant_experience',
+                'paid_status' => 'paid_status_order',
+                'created_at' => 'applicants.created_at',
+                'updated_at' => 'applicants.updated_at',
+            ];
 
-            if ($orderColumn === 'job_source') {
-                $model->orderBy('job_source_id', $orderDirection);
-            } elseif ($orderColumn === 'job_category') {
-                $model->orderBy('job_category_id', $orderDirection);
-            } elseif ($orderColumn === 'job_title') {
-                $model->orderBy('job_title_id', $orderDirection);
-            } elseif ($orderColumn === 'notes_created_at') {
-                // ✅ Must use orderByRaw for computed/aliased columns
-                $model->orderByRaw("notes_created_at {$orderDirection}");
-            } elseif ($orderColumn && !in_array($orderColumn, ['DT_RowIndex', 'checkbox'])) {
-                $model->orderBy($orderColumn, $orderDirection);
+            if ($orderColumn === 'notes_created_at') {
+                $model->orderByRaw('notes_created_at ' . $orderDirection);       // computed column
+            } elseif (isset($sortable[$orderColumn])) {
+                $model->orderBy($sortable[$orderColumn], $orderDirection);
             } else {
-                // ✅ Fallback default
                 $model->orderByRaw('notes_created_at DESC');
             }
         } else {
@@ -4346,37 +4268,8 @@ class SaleController extends Controller
             ->addColumn('notes_created_at', function ($applicant) {
                 return Carbon::parse($applicant->notes_created_at)->format('d M Y, h:i A');
             })
-            ->orderColumn('notes_created_at', 'notes_created_at $1') // ✅ direct column name
-            ->addColumn('applicant_resume', function ($applicant) {
-                $path = $applicant->applicant_cv;
-                if ($path && str_starts_with($path, 'uploads/')) {
-                    $fullPath = public_path($path);
-                    if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
-                        $url = asset($path);
-                        return '<a href="' . $url . '" title="Download CV" target="_blank" class="text-decoration-none">
-                                    <iconify-icon icon="solar:download-square-bold" class="text-success fs-28"></iconify-icon>
-                                </a>';
-                    }
-                }
-                return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                            <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                        </button>';
-            })
-            ->addColumn('crm_resume', function ($applicant) {
-                $path = $applicant->updated_cv;
-                if ($path && str_starts_with($path, 'uploads/')) {
-                    $fullPath = public_path($path);
-                    if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
-                        $url = asset($path);
-                        return '<a href="' . $url . '" title="Download Updated CV" target="_blank" class="text-decoration-none">
-                                    <iconify-icon icon="solar:download-square-bold" class="text-primary fs-28"></iconify-icon>
-                                </a>';
-                    }
-                }
-                return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                            <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                        </button>';
-            })
+            ->addColumn('applicant_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->applicant_cv, $applicant->is_blocked, 'original', 'success', 'Download CV'))
+            ->addColumn('crm_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->updated_cv, $applicant->is_blocked, 'updated', 'primary', 'Download Updated CV'))
             ->addColumn('paid_status', function ($applicant) use ($sale_id) {
                 $status_value = 'open';
                 $color_class  = 'bg-dark';
@@ -4411,7 +4304,6 @@ class SaleController extends Controller
 
                 return '<span class="badge ' . $color_class . '">' . ucwords($status_value) . '</span>';
             })
-            ->orderColumn('paid_status', 'paid_status_order $1')
             ->addColumn('action', function ($applicant) use ($sale_id, $sale, $sale_cv_counts) {
                 $status_value = $this->getApplicantStatusForSale($applicant, $sale_id);
 
@@ -4469,6 +4361,9 @@ class SaleController extends Controller
                 // ✅ notes_created_at removed from rawColumns (plain formatted text, not HTML)
             ])
             ->with(['sale_id' => $sale_id])
+            // Sorted above from the allowlist only. DataTables' own sort would also add the column
+            // named in the request (an unknown one was a 500).
+            ->order(function () {})
             ->make(true);
     }
     private function getApplicantStatusForSale($applicant, $sale_id): string
@@ -4492,145 +4387,99 @@ class SaleController extends Controller
     }
     public function storeSaleNotes(Request $request)
     {
+        $v = $request->validate([
+            'sale_id' => 'required|integer|exists:sales,id',
+            'details' => 'required|string|max:5000',
+        ]);
         $user = Auth::user();
+        $sale = Sale::findOrFail((int) $v['sale_id']);
+        $sale_notes = $v['details'] . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
 
-        $sale_id = $request->input('sale_id');
-        $details = $request->input('details');
-        $sale_notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
+        // One transaction: older notes are only switched off if the new one is saved.
+        DB::transaction(function () use ($sale, $sale_notes, $user) {
+            Sale::whereKey($sale->id)->update(['sale_notes' => $sale_notes]);   // as before: no model events
+            $sale->refresh();                                                     // the audit records the new note
 
-        $updateData = ['sale_notes' => $sale_notes];
+            SaleNote::where('sale_id', $sale->id)->update(['status' => 0]);
+            $sale_note = SaleNote::create([
+                'sale_id' => $sale->id,
+                'sale_note' => $sale_notes,
+                'user_id' => $user->id,
+            ]);
+            $sale_note->update(['sales_notes_uid' => md5($sale_note->id)]);
 
-        Sale::where('id', $sale_id)->update($updateData);
+            (new ActionObserver())->customSaleAudit($sale, 'sale_notes');
 
-        SaleNote::where('sale_id', $sale_id)->update(['status' => 0]);
-
-        $sale_note = SaleNote::create([
-            'sale_id' => $sale_id,
-            'sale_note' => $sale_notes,
-            'user_id' => $user->id,
-        ]);
-
-        $sale_note->update(['sales_notes_uid' => md5($sale_note->id)]);
-
-        $sale = Sale::findOrFail($sale_id);
-        $audit = new ActionObserver();
-        $audit->customSaleAudit($sale, 'sale_notes');
-
-        // Disable previous module note
-        ModuleNote::where([
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale'
-        ])
-            ->where('status', 1)
-            ->update(['status' => 0]);
-
-        // Create new module note
-        $moduleNote = ModuleNote::create([
-            'details' => $sale_notes,
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale',
-            'user_id' => $user->id,
-        ]);
-
-        $moduleNote->update(['module_note_uid' => md5($moduleNote->id)]);
+            $this->replaceSaleModuleNote($sale->id, $sale_notes, $user->id, false);
+        });
 
         return redirect()->to(url()->previous());
     }
+
+    /** Switch off the sale's current module note and add the new one (the CRM's "latest note"). */
+    private function replaceSaleModuleNote(int $saleId, string $details, int $userId, bool $withStatus = true): void
+    {
+        ModuleNote::where(['module_noteable_id' => $saleId, 'module_noteable_type' => 'Horsefly\Sale'])
+            ->where('status', 1)->update(['status' => 0]);
+        $moduleNote = ModuleNote::create(array_merge([
+            'details' => $details,
+            'module_noteable_id' => $saleId,
+            'module_noteable_type' => 'Horsefly\Sale',
+            'user_id' => $userId,
+        ], $withStatus ? ['status' => 1] : []));
+        $moduleNote->update(['module_note_uid' => md5($moduleNote->id)]);
+    }
     public function changeSaleStatus(Request $request)
     {
-        $user = Auth::user();
-
-        $sale_id = $request->input('sale_id');
-        $status = $request->input('status');
-        $details = $request->input('details');
-        $sale_notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
-
-        if ($status == 1) {
-            $updateData = [
-                'sale_notes' => $sale_notes,
-                'status' => 2, // Assuming 2 is for pending
-                'is_on_hold' => false,
-                'is_re_open' => false
-            ];
-        } else {
-            $updateData = [
-                'sale_notes' => $sale_notes,
-                'status' => $status, // Assuming 2 is for pending
-                'is_on_hold' => false,
-                'is_re_open' => false
-            ];
-        }
-
-        $sale = Sale::findOrfail($sale_id);
-        $sale->update($updateData);
-
-        $audit = new ActionObserver();
-        $audit->changeSaleStatus($sale, ['status' => $status]);
-
-        // Disable previous module note
-        ModuleNote::where([
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale'
-        ])
-            ->where('status', 1)
-            ->update(['status' => 0]);
-
-        // Create new module note
-        $moduleNote = ModuleNote::create([
-            'details' => $sale_notes,
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale',
-            'user_id' => $user->id,
-            'status' => 1,
+        $v = $request->validate([
+            'sale_id' => 'required|integer|exists:sales,id',
+            'status' => 'required|in:0,1,2,3',          // closed, open, pending, rejected
+            'details' => 'required|string|max:5000',
         ]);
+        $user = Auth::user();
+        $status = (int) $v['status'];
+        $sale = Sale::findOrFail((int) $v['sale_id']);
+        $sale_notes = $v['details'] . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
+        // Opening a sale makes it pending (2) until it is approved.
+        $stored = $status === 1 ? 2 : $status;
 
-        $moduleNote->update(['module_note_uid' => md5($moduleNote->id)]);
+        DB::transaction(function () use ($sale, $status, $stored, $sale_notes, $user) {
+            $sale->update([
+                'sale_notes' => $sale_notes,
+                'status' => $stored,
+                'is_on_hold' => false,
+                'is_re_open' => false,
+            ]);
+            // The audit's message keeps the action asked for ("sale-opened" is the open date the
+            // exports and the portal feed read); changes_made also records what was stored.
+            (new ActionObserver())->changeSaleStatus($sale, ['status' => $status, 'stored_status' => $stored]);
+
+            $this->replaceSaleModuleNote($sale->id, $sale_notes, $user->id);
+        });
 
         return redirect()->to(url()->previous());
     }
     public function changeSaleHoldStatus(Request $request)
     {
-        $user = Auth::user();
-
-        $sale_id = $request->input('id');
-        $status = $request->input('status');
-        $details = $request->input('details');
-        $sale_notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
-
-        if (isset($request->details)) {
-            $updateData = [
-                'is_on_hold' => $status,
-                'sale_notes' => $sale_notes
-            ];
-        } else {
-            $updateData = [
-                'is_on_hold' => $status
-            ];
-        }
-
-        $sale = Sale::FindOrfail($sale_id);
-        $sale->update($updateData);
-
-        // Disable previous module note
-        ModuleNote::where([
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale'
-        ])
-            ->where('status', 1)
-            ->update(['status' => 0]);
-
-        // Create new module note
-        $moduleNote = ModuleNote::create([
-            'details' => $sale_notes,
-            'module_noteable_id' => $sale_id,
-            'module_noteable_type' => 'Horsefly\Sale',
-            'user_id' => $user->id,
+        $v = $request->validate([
+            'id' => 'required|integer|exists:sales,id',
+            'status' => 'required|in:0,1,2',            // off hold, on hold, pending approval
+            'details' => 'nullable|string|max:5000',
         ]);
+        $user = Auth::user();
+        $status = (int) $v['status'];
+        $sale = Sale::findOrFail((int) $v['id']);
+        $sale_notes = ($v['details'] ?? '') . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
 
-        $moduleNote->update(['module_note_uid' => md5($moduleNote->id)]);
+        DB::transaction(function () use ($sale, $status, $sale_notes, $user, $v) {
+            $sale->update(isset($v['details'])
+                ? ['is_on_hold' => $status, 'sale_notes' => $sale_notes]
+                : ['is_on_hold' => $status]);
 
-        $audit = new ActionObserver();
-        $audit->changeSaleOnHoldStatus($sale, ['status' => $status]);
+            $this->replaceSaleModuleNote($sale->id, $sale_notes, $user->id, false);
+
+            (new ActionObserver())->changeSaleOnHoldStatus($sale, ['status' => $status]);
+        });
 
         return redirect()->to(url()->previous());
     }
@@ -4643,6 +4492,10 @@ class SaleController extends Controller
         ]);
 
         $sale = Sale::findOrFail($request->sale_id);
+        if ((int) $sale->is_on_hold !== 2) {          // only a sale waiting for approval can be approved
+            return response()->json(['success' => false,
+                'message' => 'This sale is not waiting for on-hold approval.'], 409);
+        }
 
         if ($request->status == 1) {
             $sale->is_on_hold = 1;

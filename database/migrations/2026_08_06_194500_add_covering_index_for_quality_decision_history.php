@@ -31,7 +31,12 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('history', fn (Blueprint $t) => $t->dropIndexIfExists('idx_history_quality_decision'));
+        // Blueprint has no dropIndexIfExists(): guard with hasIndex so a rollback works.
+        foreach ([
+            ['history', 'idx_history_quality_decision'],
+        ] as [$table, $index]) {
+            \App\Support\SchemaIndex::dropIfExists($table, $index);
+        }
     }
 
     private function indexExists(string $table, string $indexName): bool

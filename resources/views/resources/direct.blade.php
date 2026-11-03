@@ -1220,7 +1220,7 @@
                 // AJAX request
                 $.ajax({
                     url: '{{ route('changeSaleHoldStatus') }}',
-                    type: 'GET',
+                    type: 'POST',
                     data: {
                         id: saleID,
                         details: notes,

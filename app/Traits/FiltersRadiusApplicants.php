@@ -231,7 +231,11 @@ trait FiltersRadiusApplicants
         return array_values(array_filter((array) $value, fn ($item) => $item !== '' && $item !== null));
     }
 
-    protected function applyRadiusDistanceFilter($query, float $lat, float $lng, float $radiusKm)
+    /**
+     * A cheap latitude/longitude box around the radius (padded 5%), so an index can narrow the rows
+     * before the haversine runs on each one. It never excludes anyone the haversine would keep.
+     */
+    protected function applyRadiusBoundingBox($query, float $lat, float $lng, float $radiusKm)
     {
         $padded = $radiusKm * 1.05;
         $deltaLat = $padded / 111.32;
@@ -240,9 +244,14 @@ trait FiltersRadiusApplicants
 
         return $query
             ->whereBetween('applicants.lat', [$lat - $deltaLat, $lat + $deltaLat])
-            ->whereBetween('applicants.lng', [$lng - $deltaLng, $lng + $deltaLng])
+            ->whereBetween('applicants.lng', [$lng - $deltaLng, $lng + $deltaLng]);
+    }
+
+    protected function applyRadiusDistanceFilter($query, float $lat, float $lng, float $radiusKm)
+    {
+        return $this->applyRadiusBoundingBox($query, $lat, $lng, $radiusKm)
             ->whereRaw(
-                '(6371 * acos(cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))) <= ?',
+                '(6371 * acos(LEAST(1, GREATEST(-1, cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))))) <= ?',
                 [$lat, $lng, $lat, $radiusKm]
             );
     }

@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\ConfirmablePasswordController;
 use App\Http\Controllers\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Auth\EmailVerificationPromptController;
@@ -15,14 +14,7 @@ Route::get('/register', [RegisteredUserController::class, 'create'])
     ->name('register');
 
 Route::post('/register', [RegisteredUserController::class, 'store'])
-    ->middleware('guest');
-
-Route::get('/login', [AuthenticatedSessionController::class, 'create'])
-    ->middleware('guest')
-    ->name('login');
-
-Route::post('/login', [AuthenticatedSessionController::class, 'store'])
-    ->middleware('guest');
+    ->middleware(['guest', 'throttle:5,1']);
 
 Route::get('/forgot-password', [PasswordResetLinkController::class, 'create'])
     ->middleware('guest')
@@ -59,6 +51,3 @@ Route::get('/confirm-password', [ConfirmablePasswordController::class, 'show'])
 Route::post('/confirm-password', [ConfirmablePasswordController::class, 'store'])
     ->middleware('auth');
 
-Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
-    ->middleware('auth')
-    ->name('logout');

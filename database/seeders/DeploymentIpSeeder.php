@@ -19,12 +19,14 @@ class DeploymentIpSeeder extends Seeder
         if ($user) {
             $ip = getHostByName(getHostName()) ?? request()->ip() ?? '127.0.0.1';
 
-            DB::table('ip_addresses')->insert([
-                'user_id'    => $user->id,
-                'ip_address' => $ip,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            if (!DB::table('ip_addresses')->where('user_id', $user->id)->where('ip_address', $ip)->exists()) {
+                DB::table('ip_addresses')->insert([
+                    'user_id'    => $user->id,
+                    'ip_address' => $ip,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
         }
     }
 }

@@ -28,6 +28,10 @@ class SmtpSettingsTableSeeder extends Seeder
             ]
         ];
 
-        DB::table('smtp_settings')->insert($settings);
+        // Placeholder settings for a fresh install only: never add a second active row, never
+        // overwrite real settings.
+        if (!DB::table('smtp_settings')->exists()) {
+            DB::table('smtp_settings')->insert($settings);
+        }
     }
 }

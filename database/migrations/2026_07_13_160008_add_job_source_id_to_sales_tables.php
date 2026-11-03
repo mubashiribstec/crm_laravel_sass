@@ -12,7 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('sales', function (Blueprint $table) {
-            $table->unsignedBigInteger('job_source_id')->nullable()->after('job_title_id');
+            if (!Schema::hasColumn('sales', 'job_source_id')) {   // guard: a partial migrate or hand-made column (M-08)
+                $table->unsignedBigInteger('job_source_id')->nullable()->after('job_title_id');
+            }
         });
     }
 

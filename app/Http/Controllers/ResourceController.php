@@ -2,7 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\ApplicantAgeWindows;
+use App\Services\Xplogent\SaleInterestService;
 use Illuminate\Http\Request;
+use App\Support\CvStorage;
 
 use Horsefly\Sale;
 use Horsefly\Office;
@@ -937,7 +940,7 @@ class ResourceController extends Controller
             ->where(function ($q) use ($salesData, $radius) {
                 foreach ($salesData as $sale) {
                     $q->orWhereRaw(
-                        '(6371 * acos(cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))) <= ?',
+                        '(6371 * acos(LEAST(1, GREATEST(-1, cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))))) <= ?',
                         [$sale->lat, $sale->lng, $sale->lat, $radius]
                     );
                 }
@@ -1100,48 +1103,8 @@ class ResourceController extends Controller
                     }
                     return $notes;
                 })
-                ->addColumn('applicant_resume', function ($applicant) {
-                    $path = $applicant->applicant_cv; // e.g. uploads/cv/file.pdf
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
-
-                            $url = asset($path); // direct public URL
-
-                            return '<a href="' . $url . '" title="Download CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-success fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
-                ->addColumn('crm_resume', function ($applicant) {
-                    $path = $applicant->updated_cv;
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
-
-                            $url = asset($path);
-
-                            return '<a href="' . $url . '" title="Download Updated CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-primary fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
+                ->addColumn('applicant_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->applicant_cv, $applicant->is_blocked, 'original', 'success', 'Download CV'))
+                ->addColumn('crm_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->updated_cv, $applicant->is_blocked, 'updated', 'primary', 'Download Updated CV'))
                 ->addColumn('applicantEmail', function ($applicant) {
                     // Blocked applicant + no permission
                     if ($applicant->is_blocked && !Gate::allows('applicant-show-blocked-data')) {
@@ -1270,7 +1233,7 @@ class ResourceController extends Controller
             ->leftJoin('job_sources', 'applicants.job_source_id', '=', 'job_sources.id')
             ->leftJoin('users', 'module_notes.user_id', '=', 'users.id')
             ->whereRaw(
-                '(6371 * acos(cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))) <= ?',
+                '(6371 * acos(LEAST(1, GREATEST(-1, cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))))) <= ?',
                 [$lat, $lng, $lat, $radius]
             );
 
@@ -2929,72 +2892,8 @@ class ResourceController extends Controller
 
                     return $strng;
                 })
-                // ->addColumn('applicant_resume', function ($applicant) {
-                //     $filePath = $applicant->applicant_cv;
-                //     $fileExists = $applicant->applicant_cv && Storage::disk('public')->exists($filePath);
-
-                //     if (!$applicant->is_blocked && $fileExists) {
-                //         return '<a href="' . asset('storage/' . $filePath) . '" title="Download CV" target="_blank" class="text-decoration-none">' .
-                //             '<iconify-icon icon="solar:download-square-bold" class="text-success fs-28"></iconify-icon></a>';
-                //     }
-
-                //     return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">' .
-                //         '<iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon></button>';
-                // })
-                // ->addColumn('crm_resume', function ($applicant) {
-                //     $filePath = $applicant->updated_cv;
-                //     $fileExists = $applicant->updated_cv && Storage::disk('public')->exists($filePath);
-
-                //     if (!$applicant->is_blocked && $fileExists) {
-                //         return '<a href="' . asset('storage/' . $filePath) . '" title="Download Updated CV" target="_blank" class="text-decoration-none">' .
-                //             '<iconify-icon icon="solar:download-square-bold" class="text-primary fs-28"></iconify-icon></a>';
-                //     }
-
-                //     return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">' .
-                //         '<iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon></button>';
-                // })
-                ->addColumn('applicant_resume', function ($applicant) {
-                    $path = $applicant->applicant_cv; // e.g. uploads/cv/file.pdf
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
-
-                            $url = asset($path); // direct public URL
-
-                            return '<a href="' . $url . '" title="Download CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-success fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
-                ->addColumn('crm_resume', function ($applicant) {
-                    $path = $applicant->updated_cv;
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
-
-                            $url = asset($path);
-
-                            return '<a href="' . $url . '" title="Download Updated CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-primary fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
+                ->addColumn('applicant_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->applicant_cv, $applicant->is_blocked, 'original', 'success', 'Download CV'))
+                ->addColumn('crm_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->updated_cv, $applicant->is_blocked, 'updated', 'primary', 'Download Updated CV'))
                 ->addColumn('applicant_experience', function ($applicant) {
                     if (empty($applicant->applicant_experience) || $applicant->applicant_experience === 'NULL') {
                         return '-';
@@ -3739,44 +3638,8 @@ class ResourceController extends Controller
             });
         }
 
-        $now = Carbon::today();
-        switch ($dateRangeFilter) {
-            case 'last-21-days':
-                $endDate = $now->copy()->subDays(16);
-                $startDate = $endDate->copy()->subDays(21)->startOfDay();
-                $model->whereBetween('applicants.updated_at', [$startDate, $endDate->endOfDay()]);
-                break;
-
-            case 'last-3-months':
-                $endDate = $now->copy()->subDays(37);
-                $startDate = $endDate->copy()->subMonths(3)->startOfDay();
-                $model->whereBetween('applicants.updated_at', [$startDate, $endDate->endOfDay()]);
-                break;
-
-            case 'last-6-months':
-                $endDate = $now->copy()->subMonths(3)->subDays(37);
-                $startDate = $endDate->copy()->subMonths(6)->startOfDay();
-                $model->whereBetween('applicants.updated_at', [$startDate, $endDate->endOfDay()]);
-                break;
-
-            case 'last-9-months':
-                $endDate = $now->copy()->subMonths(9)->subDays(37);
-                $startDate = $endDate->copy()->subMonths(9)->startOfDay();
-                $model->whereBetween('applicants.updated_at', [$startDate, $endDate->endOfDay()]);
-                break;
-
-            case 'other':
-                $cutoffDate = $now->copy()->subMonths(19)->subDays(7);
-                $model->where('applicants.updated_at', '<', $cutoffDate);
-                break;
-
-            case 'last-7-days':
-            default:
-                $startDate = $now->copy()->subDays(16)->startOfDay();
-                $endDate = $now->endOfDay();
-                $model->whereBetween('applicants.updated_at', [$startDate, $endDate]);
-                break;
-        }
+        // The age buckets are shared with the dashboard's counts (App\Support\ApplicantAgeWindows).
+        ApplicantAgeWindows::apply($model, 'applicants.updated_at', $dateRangeFilter);
 
         // Sorting is applied by DataTables (see orderColumn mappings below). When the
         // request has no sortable column, default to the latest note first.
@@ -4104,48 +3967,8 @@ class ResourceController extends Controller
                         </div>
                     ';
                 })
-                ->addColumn('applicant_resume', function ($applicant) {
-                    $path = $applicant->applicant_cv; // e.g. uploads/cv/file.pdf
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
-
-                            $url = asset($path); // direct public URL
-
-                            return '<a href="' . $url . '" title="Download CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-success fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
-                ->addColumn('crm_resume', function ($applicant) {
-                    $path = $applicant->updated_cv;
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (!$applicant->is_blocked && file_exists($fullPath) || Gate::allows('applicant-show-blocked-data')) {
-
-                            $url = asset($path);
-
-                            return '<a href="' . $url . '" title="Download Updated CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-primary fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
+                ->addColumn('applicant_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->applicant_cv, $applicant->is_blocked, 'original', 'success', 'Download CV'))
+                ->addColumn('crm_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->updated_cv, $applicant->is_blocked, 'updated', 'primary', 'Download Updated CV'))
                 ->addColumn('customStatus', function ($applicant) {
                     $status_value = 'open';
                     $color_class = 'bg-dark';
@@ -4511,8 +4334,8 @@ class ResourceController extends Controller
             $applicant_ids = $request->input('applicant_ids', []);
             $sale_ids = $request->input('sale_ids', []);
 
-            $details = 'Applicant marked as interested on sale';
-            $notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
+            // Shared with the Xplogent API (App\Services\Xplogent\SaleInterestService).
+            $interest = app(SaleInterestService::class);
 
             if (!empty($applicant_ids) && !empty($sale_ids)) {
                 foreach ($applicant_ids as $index => $applicant_id) {
@@ -4520,50 +4343,7 @@ class ResourceController extends Controller
                     if (!$sale_id) {
                         continue; // skip if missing
                     }
-
-                    // Find existing pivot
-                    $pivotSale = ApplicantPivotSale::where([
-                        'applicant_id' => $applicant_id,
-                        'sale_id' => $sale_id,
-                    ])->first();
-
-                    if ($pivotSale) {
-                        // Mark as interested
-                        $pivotSale->update(['is_interested' => true]);
-
-                        // Delete related range notes
-                        NotesForRangeApplicant::where('applicants_pivot_sales_id', $pivotSale->id)->delete();
-
-                        $pivotSale->delete();
-                    }
-
-                    // Check if applicant has NO pivot sale records at all
-                    $hasPivotRecord = ApplicantPivotSale::where('applicant_id', $applicant_id)->exists();
-
-                    if (!$hasPivotRecord) {
-                        Applicant::where('id', $applicant_id)
-                            ->update(['is_temp_not_interested' => false]);
-                    }
-
-                    // Deactivate previous active notes
-                    ModuleNote::where([
-                        'module_noteable_id' => $applicant_id,
-                        'module_noteable_type' => 'Horsefly\Applicant',
-                        'status' => 1
-                    ])->update(['status' => 0]);
-
-                    // Create a new note
-                    $moduleNote = ModuleNote::create([
-                        'details' => $notes,
-                        'user_id' => $user->id,
-                        'module_noteable_id' => $applicant_id,
-                        'module_noteable_type' => 'Horsefly\Applicant',
-                        'status' => 1
-                    ]);
-
-                    $moduleNote->update([
-                        'module_note_uid' => md5($moduleNote->id)
-                    ]);
+                    $interest->revertNotInterested((int) $applicant_id, (int) $sale_id, $user);
                 }
             }
 
@@ -4592,46 +4372,8 @@ class ResourceController extends Controller
             $applicant_id = $request->input('applicant_id');
             $sale_id = $request->input('sale_id');
             $details = $request->input('details');
-            $notes = $details . ' --- By: ' . $user->name . ' Date: ' . now()->format('d-m-Y');
-
-            // Create pivot sale entry
-            $pivotSale = ApplicantPivotSale::create([
-                'applicant_id' => $applicant_id,
-                'sale_id' => $sale_id
-            ]);
-
-            $pivotSale->update([
-                'pivot_uid' => md5($pivotSale->id)
-            ]);
-
-            // Add notes for range
-            $notesForRange = NotesForRangeApplicant::create([
-                'applicants_pivot_sales_id' => $pivotSale->id,
-                'reason' => $notes,
-            ]);
-
-            $notesForRange->update([
-                'range_uid' => md5($notesForRange->id)
-            ]);
-
-            // Disable previous active module notes
-            ModuleNote::where([
-                'module_noteable_id' => $applicant_id,
-                'module_noteable_type' => 'Horsefly\Applicant',
-                'status' => 1
-            ])->update(['status' => 0]);
-
-            // Create new module note
-            $moduleNote = ModuleNote::create([
-                'details' => $notes,
-                'user_id' => $user->id,
-                'module_noteable_id' => $applicant_id,
-                'module_noteable_type' => 'Horsefly\Applicant'
-            ]);
-
-            $moduleNote->update([
-                'module_note_uid' => md5($moduleNote->id)
-            ]);
+            // Shared with the Xplogent API (App\Services\Xplogent\SaleInterestService).
+            app(SaleInterestService::class)->markNotInterested((int) $applicant_id, (int) $sale_id, (string) $details, $user);
 
             DB::commit();
             return redirect()->back()->with('success', 'Applicant marked as not interested successfully.');

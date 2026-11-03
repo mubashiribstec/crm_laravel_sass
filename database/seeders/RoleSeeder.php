@@ -17,18 +17,11 @@ class RoleSeeder extends Seeder
      */
     public function run(): void
     {
-        // Insert roles
-        DB::table('roles')->insert([
-            ['name' => 'super_admin', 'type' => 'super_admin', 'guard_name' => 'web', 'created_at' => Carbon::now(), 'updated_at' => Carbon::now()],
-            ['name' => 'admin', 'type' => 'admin', 'guard_name' => 'web', 'created_at' => Carbon::now(), 'updated_at' => Carbon::now()],
-            ['name' => 'crm', 'type' => 'crm', 'guard_name' => 'web', 'created_at' => Carbon::now(), 'updated_at' => Carbon::now()],
-            ['name' => 'sales', 'type' => 'sales', 'guard_name' => 'web', 'created_at' => Carbon::now(), 'updated_at' => Carbon::now()],
-            ['name' => 'quality', 'type' => 'quality', 'guard_name' => 'web', 'created_at' => Carbon::now(), 'updated_at' => Carbon::now()],
-            ['name' => 'agent', 'type' => 'agent', 'guard_name' => 'web', 'created_at' => Carbon::now(), 'updated_at' => Carbon::now()],
-        ]);
-
-        // Fetch the super_admin role
-        $superAdminRole = Role::where('name', 'super_admin')->first();
+        // Idempotent: a second db:seed used to fail on roles_name_guard_name_unique.
+        foreach (['super_admin', 'admin', 'crm', 'sales', 'quality', 'agent'] as $name) {
+            Role::firstOrCreate(['name' => $name, 'guard_name' => 'web'], ['type' => $name]);
+        }
+        $superAdminRole = Role::where('name', 'super_admin')->where('guard_name', 'web')->firstOrFail();
 
         // Fetch all permissions
         $allPermissions = Permission::all();
@@ -36,9 +29,9 @@ class RoleSeeder extends Seeder
         // Assign all permissions to super_admin role
         $superAdminRole->syncPermissions($allPermissions);
 
-        // OPTIONAL: Assign role to a user (this adds to model_has_roles)
-        $user = User::find(1); // Make sure user with id 1 exists
-        if ($user) {
+        // The seeded admin (by email, not "whoever has id 1").
+        $user = User::where('email', 'admin@gmail.com')->first();
+        if ($user && !$user->hasRole('super_admin')) {
             $user->assignRole('super_admin'); // This updates model_has_roles
         }
     }

@@ -15,6 +15,7 @@ class DialLock extends Model
         'user_id',
         'user_name',
         'applicant_id',
+        'lock_token',     // Xplogent: only the same per-call token may renew or release
         'call_count',
         'locked_at',
         'expires_at',

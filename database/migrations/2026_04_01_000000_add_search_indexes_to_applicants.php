@@ -52,15 +52,13 @@ return new class extends Migration {
 
     public function down(): void
     {
-        Schema::table('applicants', function (Blueprint $table) {
-            $table->dropIndexIfExists('idx_applicant_name');
-            $table->dropIndexIfExists('idx_applicant_email');
-            $table->dropIndexIfExists('idx_applicant_postcode');
-            $table->dropIndexIfExists('idx_applicant_phone');
-            $table->dropIndexIfExists('idx_applicant_landline');
-            $table->dropIndexIfExists('idx_status_created');
-            $table->dropIndexIfExists('idx_blocked_status');
-        });
+        // Blueprint has no dropIndexIfExists(), so this used to fail on every rollback; it also forgot
+        // idx_applicant_email_secondary (M-07). idx_applicant_phone_secondary belongs to 2025_12_30
+        // (this migration only adds it when missing), so it is left to that migration's rollback.
+        foreach (['idx_applicant_name', 'idx_applicant_email', 'idx_applicant_email_secondary', 'idx_applicant_postcode',
+                     'idx_applicant_phone', 'idx_applicant_landline', 'idx_status_created', 'idx_blocked_status'] as $index) {
+            \App\Support\SchemaIndex::dropIfExists('applicants', $index);
+        }
     }
 
     /**

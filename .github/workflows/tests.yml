@@ -1,0 +1,67 @@
+name: tests
+
+on:
+  push:
+    branches: [dev, main, xplogent]
+  pull_request:
+
+jobs:
+  # Production and the Docker setup run MariaDB (11.8, as in docker-compose.yml). MySQL 8 is
+  # tested too, so the code stays portable: a migration MySQL 8 refuses (a default on a TEXT
+  # column) once slipped through MariaDB-only CI.
+  phpunit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db:
+          - { name: mariadb, image: "mariadb:11.8", health: "healthcheck.sh --connect --innodb_initialized" }
+          - { name: mysql8, image: "mysql:8.0", health: "mysqladmin ping -h 127.0.0.1" }
+    name: phpunit (${{ matrix.db.name }})
+    services:
+      db:
+        image: ${{ matrix.db.image }}
+        env:
+          # A throwaway database inside CI only. Each image reads its own variables.
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+          MARIADB_DATABASE: crm_test
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: crm_test
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="${{ matrix.db.health }}"
+          --health-interval=10s --health-timeout=5s --health-retries=15
+    env:
+      APP_ENV: testing
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: crm_test
+      DB_USERNAME: root
+      DB_PASSWORD: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: mbstring, intl, gd, pdo_mysql, zip
+          coverage: none
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: cp .env.example .env && php artisan key:generate
+      # A fresh install must migrate, and seeding must be safe to repeat.
+      - run: php artisan migrate:fresh --seed --force && php artisan db:seed --force
+      - run: php artisan test        # the whole suite (Unit + Feature)
+
+  # Scans the commits a pull request adds. Older history still holds credentials that
+  # were removed from the tree (rotate them; rewriting history is a separate decision),
+  # so a full-history scan would always fail.
+  secrets:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

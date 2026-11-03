@@ -62,7 +62,8 @@ class CrmActionModals
     ];
 
     public const TAB_MODALS = [
-        'open cvs' => ['updateCrmNotesModal', 'crmRevertInQualityModal'],
+        // crmSentCvToRequestModal: Open CVs' "Send request" uses the Sent CV tab's dialog (audit N-08).
+        'open cvs' => ['updateCrmNotesModal', 'crmSentCvToRequestModal', 'crmRevertInQualityModal'],
         'sent cvs (no job)' => ['updateCrmNoJobNotesModal', 'crmSendNoJobRequestModal', 'crmSentCvNoJobRevertInQualityModal'],
         'rejected cvs' => ['crmRevertRejectedCvToSentCvModal', 'crmRevertRejectedCvToQualityModal'],
         'request' => ['crmScheduleInterviewModal', 'crmSendApplicantEmailRequestModal', 'crmMoveToconfirmationModal', 'crmMoveRequestToNoResponseModal', 'crmRevertRequestedCvToSentCvModal', 'crmRevertRequestedCvToQualityModal', 'crmSendApplicantEmailOnRequestRejectModal'],

@@ -75,6 +75,8 @@ document.addEventListener("DOMContentLoaded", function () {
         acceptedFiles: ".pdf,.doc,.docx,.txt",
         maxFiles: 20
     });
-    initializeDropzone("officeAttachmentDropzone", "officeAttachmentPreview");
-    initializeDropzone("unitAttachmentDropzone", "unitAttachmentPreview");
+    // Office and unit attachments: the types the server accepts (App\Support\DocumentStorage::EXTENSIONS).
+    const attachmentTypes = ".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.gif,.webp";
+    initializeDropzone("officeAttachmentDropzone", "officeAttachmentPreview", { acceptedFiles: attachmentTypes });
+    initializeDropzone("unitAttachmentDropzone", "unitAttachmentPreview", { acceptedFiles: attachmentTypes });
 });

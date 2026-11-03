@@ -21,6 +21,7 @@ use App\Http\Controllers\QualityController;
 use App\Http\Controllers\RegionController;
 use App\Http\Controllers\FreePBXController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ApplicantCvController;
 use App\Http\Controllers\DialLockController;
 use App\Http\Controllers\ImportController;
 use App\Http\Controllers\ScrapController;
@@ -38,9 +39,15 @@ use App\Http\Controllers\ScrapController;
 
 require __DIR__ . '/auth.php';
 
-Route::get('/', [LoginController::class, 'showLoginForm'])->name('login');
+// Login and logout: LoginController only (IP allowlist, active accounts, logout_at). "/" is the
+// dashboard root below (guests are sent to /login); auth.php no longer has Breeze copies of these.
+Route::get('login', [LoginController::class, 'showLoginForm'])->middleware('guest')->name('login');
 Route::post('login', [LoginController::class, 'login'])->middleware('throttle:5,1');
-Route::get('logout', [LoginController::class, 'logout'])->name('logout');
+// POST only: a GET logout can be triggered by any link or prefetch (R-06).
+Route::post('logout', [LoginController::class, 'logout'])->middleware('auth')->name('logout');
+// Where PermissionHelper::firstAllowedRoute sends a signed-in user with no permission at all
+// (e.g. an approved sign-up without a role yet); the route was missing, so that sign-in was a 500.
+Route::view('no-access', 'auth.no-access')->middleware('auth')->name('no-permission');
 
 Route::get('message_receive', [CommunicationController::class, 'messageReceive']);
 /**This route is using to retrieve messages from openVox */
@@ -48,6 +55,14 @@ Route::get('message_receive', [CommunicationController::class, 'messageReceive']
 // Route group with authentication middleware
 Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     // Click-to-dial collision control — lock a number while an agent calls it
+    // Xplogent "Agent call" page (permission: xplogent-agent-call)
+    Route::get('xplogent/agent-call', [\App\Http\Controllers\XplogentAgentCallController::class, 'index'])->name('xplogent.agent-call');
+    Route::get('xplogent/agent-call/sales', [\App\Http\Controllers\XplogentAgentCallController::class, 'sales'])->name('xplogent.agent-call.sales');
+    Route::get('xplogent/agent-call/queue', [\App\Http\Controllers\XplogentAgentCallController::class, 'queue'])->name('xplogent.agent-call.queue');
+    Route::post('xplogent/agent-call/dial', [\App\Http\Controllers\XplogentAgentCallController::class, 'dial'])->name('xplogent.agent-call.dial');
+    Route::get('xplogent/agent-call/attempts', [\App\Http\Controllers\XplogentAgentCallController::class, 'attempts'])->name('xplogent.agent-call.attempts');
+    Route::post('xplogent/agent-call/check', [\App\Http\Controllers\XplogentAgentCallController::class, 'check'])->name('xplogent.agent-call.check');
+
     Route::get('dialing/info',          [DialLockController::class, 'info'])->name('dialing.info');
     Route::post('dialing/acquire',      [DialLockController::class, 'acquire'])->name('dialing.acquire');
     Route::post('dialing/release',      [DialLockController::class, 'release'])->name('dialing.release');
@@ -89,6 +104,9 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
         Route::post('uploadCv', [ApplicantController::class, 'uploadCv'])->name('applicants.uploadCv');
         Route::post('crmuploadCv', [ApplicantController::class, 'crmuploadCv'])->name('applicants.crmuploadCv');
         Route::get('{id}/history', [ApplicantController::class, 'history'])->name('applicants.history');
+        // CVs are not public files: this checks the login, the permission and the blocked rule.
+        Route::get('{id}/cv/{kind}', [ApplicantCvController::class, 'download'])
+            ->whereNumber('id')->whereIn('kind', ['original', 'updated'])->name('applicants.cv.download');
     });
 
     Route::get('getAvailableJobs', [ApplicantController::class, 'getAvailableJobs'])->name('getAvailableJobs');
@@ -179,7 +197,7 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     Route::post('storeSaleNotes', [SaleController::class, 'storeSaleNotes'])->name('storeSaleNotes');
     Route::post('changeSaleStatus', [SaleController::class, 'changeSaleStatus'])->name('changeSaleStatus');
     Route::get('getApplicantsBySaleRadius', [SaleController::class, 'getApplicantsBySaleRadius'])->name('getApplicantsBySaleRadius');
-    Route::get('changeSaleHoldStatus', [SaleController::class, 'changeSaleHoldStatus'])->name('changeSaleHoldStatus');
+    Route::post('changeSaleHoldStatus', [SaleController::class, 'changeSaleHoldStatus'])->name('changeSaleHoldStatus');   // was GET (R-06)
     // web.php
     Route::post('updatePendingOnHoldStatus', [SaleController::class, 'updatePendingOnHoldStatus'])->name('updatePendingOnHoldStatus');
 
@@ -289,7 +307,7 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
         Route::get('edit/{id}', [RoleController::class, 'edit'])->name('roles.edit');
         Route::get('view/{id}', [RoleController::class, 'view'])->name('roles.view');
         Route::put('update', [RoleController::class, 'update'])->name('roles.update');
-        Route::get('{id}', [RoleController::class, 'details'])->name('roles.details');
+        Route::get('{id}', [RoleController::class, 'show'])->name('roles.details');     // there is no details()
     });
     Route::get('getRoles', [RoleController::class, 'getRoles'])->name('getRoles');
     Route::get('getPermissions', [RoleController::class, 'getPermissions'])->name('getPermissions');
@@ -322,7 +340,6 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     Route::post('emailEditTemplate', [SettingController::class, 'emailEditTemplate'])->name('emailEditTemplate');
     Route::post('email-templates/store', [SettingController::class, 'emailTemplatesStore'])->name('emailTemplates.store');
     Route::put('email-templates/update', [SettingController::class, 'emailTemplatesUpdate'])->name('emailTemplates.update');
-    Route::post('emailTemplateDelete', [SettingController::class, 'emailTemplateDelete'])->name('emailTemplates.delete');
 
     /**SMS Templates */
     Route::post('settings/sms-templates', [SettingController::class, 'smsTemplatesIndex'])->name('settings.sms-templates');
@@ -330,7 +347,6 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     Route::post('smsEditTemplate', [SettingController::class, 'smsEditTemplate'])->name('smsEditTemplate');
     Route::post('sms-templates/store', [SettingController::class, 'smsTemplatesStore'])->name('smsTemplates.store');
     Route::put('sms-templates/update', [SettingController::class, 'smsTemplatesUpdate'])->name('smsTemplates.update');
-    Route::post('smsTemplateDelete', [SettingController::class, 'smsTemplateDelete'])->name('smsTemplates.delete');
 
     /** crm */
     Route::group(['prefix' => 'crm'], function () {
@@ -473,7 +489,6 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     Route::get('settings', [SettingController::class, 'index'])->name('settings.list');
     Route::get('getSettings', [SettingController::class, 'getSettings'])->name('settings.get');
 
-    Route::post('save-settings', [SettingController::class, 'saveContactSettings'])->name('settings.contact.save');
     Route::post('save-general-settings', [SettingController::class, 'saveGeneralSettings'])->name('settings.general.save');
     Route::post('save-profile-settings', [SettingController::class, 'saveProfileSettings'])->name('settings.profile.save');
     Route::post('save-sms-settings', [SettingController::class, 'saveSmsSettings'])->name('settings.sms.save');
@@ -482,7 +497,6 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     Route::post('save-smtp-settings', [SettingController::class, 'saveSmtpSettings'])->name('settings.smtp.save');
     Route::post('delete-smtp-settings', [SettingController::class, 'deleteSmtp'])->name('settings.smtp.delete');
     Route::post('save-dialing-settings', [SettingController::class, 'saveDialingSettings'])->name('settings.dialing.save');
-    Route::get('save-settings', [SettingController::class, ''])->name('settings.save');
     Route::post('save-scraper-settings', [SettingController::class, 'saveScraperSettings'])->name('settings.scraper.save');
     Route::delete('delete-scraper-actor/{key}', [SettingController::class, 'deleteScraperActor'])->name('settings.scraper.delete');
     Route::post('run-scraper-actor/{key}', [SettingController::class, 'runScraperActor'])->name('settings.scraper.run');
@@ -516,10 +530,6 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     Route::post('scrap/bulk-email-template', [ScrapController::class, 'getBulkEmailTemplate'])->name('scrap.bulk.email.template');
     Route::post('scrap/bulk-offices-email-template', [ScrapController::class, 'getBulkOfficesEmailTemplate'])->name('scrap.bulk.offices.email.template');
     Route::post('/send-bulk-emails-to-offices', [ScrapController::class, 'sendBulkEmailsToOffices'])->name('send.bulk.emails.to.offices');
-    Route::post('scrap/lookup/office/{id}', [ScrapController::class, 'lookupOfficeDetails'])->name('scrap.lookup.office');
-    Route::post('scrap/lookup/office/{id}/save', [ScrapController::class, 'saveOfficeLookup'])->name('scrap.lookup.office.save');
-    Route::post('scrap/lookup/unit/{id}', [ScrapController::class, 'lookupUnitDetails'])->name('scrap.lookup.unit');
-    Route::post('scrap/lookup/unit/{id}/save', [ScrapController::class, 'saveUnitLookup'])->name('scrap.lookup.unit.save');
 
 
     Route::group(['prefix' => 'freepbx-cdrs'], function () {
@@ -530,7 +540,7 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     Route::get('', [RoutingController::class, 'index'])->name('root');
 
     // Dynamic routes (Root, second-level, and third-level)
-    Route::get('{first}', [RoutingController::class, 'root'])->name('root');
+    Route::get('{first}', [RoutingController::class, 'root'])->name('root.first');    // 'root' is the one above
     Route::get('{first}/{second}', [RoutingController::class, 'secondLevel'])->name('second');
     Route::get('{first}/{second}/{third}', [RoutingController::class, 'thirdLevel'])->name('third');
 
