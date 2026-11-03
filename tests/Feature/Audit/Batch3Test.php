@@ -274,4 +274,41 @@ class Batch3Test extends XplogentTestCase
         $this->assertSame(collect($in)->pluck('id')->sort()->values()->all(), $ids);
         $this->assertTrue(Schema::hasIndex('applicants', 'idx_applicants_radius'));
     }
+
+    // ── P-02: the direct and rejected sale lists ─────────────────────────────
+    public function test_the_direct_and_rejected_sale_lists_return_the_same_rows_dates_and_counts(): void
+    {
+        $open = $this->sale();
+        $other = $this->sale();
+        $this->sale(['is_on_hold' => 1]);                                   // not listed
+        foreach ([[$open, '2026-10-01 09:00:00'], [$open, '2026-10-20 10:30:00'], [$other, '2026-09-15 08:00:00']] as [$sale, $at]) {
+            $sale->audits()->create(['user_id' => $this->ai->id, 'data' => '{}', 'message' => 'sale-opened'])
+                ->forceFill(['created_at' => $at])->save();
+        }
+        foreach ([1, 1, 0] as $status) {                                      // two active CVs, one inactive
+            CVNote::create(['applicant_id' => $this->applicant()->id, 'sale_id' => $open->id, 'user_id' => $this->ai->id,
+                'status' => $status, 'details' => 'x']);
+        }
+        $rejected = $this->sale(['status' => 3]);
+        $rejected->audits()->create(['user_id' => $this->ai->id, 'data' => '{}', 'message' => 'sale-rejected'])
+            ->forceFill(['created_at' => '2026-10-05 12:00:00'])->save();
+
+        $get = fn (string $uri, string $perm, array $q = []) => $this->actingAs($this->staff('Sam ' . $perm, $perm))
+            ->getJson($uri . '?' . http_build_query(['draw' => 1, 'length' => 50] + $q), ['X-Requested-With' => 'XMLHttpRequest'])
+            ->assertOk()->json('data');
+
+        $rows = collect($get('/getDirectSales', 'sale-direct-index'))->keyBy('id');
+        $this->assertEqualsCanonicalizing([$open->id, $other->id], $rows->keys()->all());
+        $this->assertSame('20 Oct 2026, 10:30 AM', $rows[$open->id]['open_date']);          // the latest "opened" audit
+        $this->assertStringContainsString('6/8', $rows[$open->id]['cv_limit']);             // 8 - 2 active CVs
+        $byDate = collect($get('/getDirectSales', 'sale-direct-index', ['columns' => [['data' => 'open_date']],
+            'order' => [['column' => 0, 'dir' => 'asc']]]))->pluck('id')->all();
+        $this->assertSame([$other->id, $open->id], $byDate);
+        $byCvs = collect($get('/getDirectSales', 'sale-direct-index', ['columns' => [['data' => 'no_of_sent_cv']],
+            'order' => [['column' => 0, 'dir' => 'desc']]]))->pluck('id')->all();
+        $this->assertSame($open->id, $byCvs[0]);
+
+        $rej = collect($get('/getRejectedSales', 'sale-rejected-index'))->keyBy('id');
+        $this->assertSame([$rejected->id], $rej->keys()->all());
+    }
 }

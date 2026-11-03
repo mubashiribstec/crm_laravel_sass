@@ -1795,9 +1795,10 @@ class SaleController extends Controller
         $officeFilter = $request->input('office_filter', ''); // Default is empty (no filter)
         $userFilter = $request->input('user_filter', ''); // Default is empty (no filter)
 
-        // Subquery to get the latest audit (open_date) for each sale
-        $latestAuditSub = DB::table('audits')
-            ->select(DB::raw('MAX(id) as id'))
+        // The latest "opened" audit per sale (open_date), as one derived table joined by id, the
+        // getSales pattern (P-02), instead of an IN (MAX(id) … GROUP BY) evaluated in the join.
+        $latestOpenAudit = DB::table('audits')
+            ->selectRaw('MAX(id) AS id, auditable_id')
             ->where('auditable_type', 'Horsefly\Sale')
             ->where('message', 'like', '%sale-opened%')
             ->groupBy('auditable_id');
@@ -1810,29 +1811,23 @@ class SaleController extends Controller
                 'offices.office_name as office_name',
                 'units.unit_name as unit_name',
                 'users.name as user_name',
-                'audits.created_at as open_date'
+                'open_audits.created_at as open_date'
             ])
             ->leftJoin('job_titles', 'sales.job_title_id', '=', 'job_titles.id')
             ->leftJoin('job_categories', 'sales.job_category_id', '=', 'job_categories.id')
             ->leftJoin('offices', 'sales.office_id', '=', 'offices.id')
             ->leftJoin('units', 'sales.unit_id', '=', 'units.id')
             ->leftJoin('users', 'sales.user_id', '=', 'users.id')
-            // Join only the latest audit for each sale
-            ->leftJoin('audits', function ($join) use ($latestAuditSub) {
-                $join->on('audits.auditable_id', '=', 'sales.id')
-                    ->where('audits.auditable_type', '=', 'Horsefly\Sale')
-                    ->where('audits.message', 'like', '%sale-opened%')
-                    ->whereIn('audits.id', $latestAuditSub);
-            })
-            ->with(['jobTitle', 'jobCategory', 'unit', 'office', 'user'])
+            // Join only the latest "opened" audit for each sale
+            ->leftJoinSub($latestOpenAudit, 'latest_open_audit_ids', 'latest_open_audit_ids.auditable_id', '=', 'sales.id')
+            ->leftJoin('audits as open_audits', 'open_audits.id', '=', 'latest_open_audit_ids.id')
+            ->with(['jobTitle', 'jobCategory'])      // the only relations the rows use (the rest are joined)
             ->where('sales.status', 1)
             ->whereNull('sales.deleted_at')
             ->where('sales.is_on_hold', 0)
-            ->where(function ($query) {
-                $query->whereNotNull('audits.id')
-                    ->orWhereNull('audits.id');
-            })
-            ->selectRaw(DB::raw("(SELECT COUNT(*) FROM cv_notes WHERE cv_notes.sale_id = sales.id AND cv_notes.status = 1) as no_of_sent_cv"));
+            ->leftJoinSub(DB::table('cv_notes')->selectRaw('sale_id, COUNT(*) AS cv_count')->where('status', 1)->groupBy('sale_id'),
+                'cv_counts', 'cv_counts.sale_id', '=', 'sales.id')   // one grouped count, not a subquery per row
+            ->addSelect(DB::raw('COALESCE(cv_counts.cv_count, 0) AS no_of_sent_cv'));
 
         $hidePrivateDataSetting = Setting::where('key', 'hide_private_data')->value('value');
 
@@ -1973,7 +1968,7 @@ class SaleController extends Controller
 
             $model->where(function ($query) use ($start_date, $end_date) {
                 $query->whereBetween('sales.updated_at', [$start_date, $end_date])
-                    ->orWhereBetween('audits.created_at', [$start_date, $end_date]);
+                    ->orWhereBetween('open_audits.created_at', [$start_date, $end_date]);
             });
         }
 
@@ -2190,13 +2185,11 @@ class SaleController extends Controller
         $userFilter = $request->input('user_filter', ''); // Default is empty (no filter)
 
         // Subquery to get the latest audit (open_date) for each sale
-        $latestAuditSub = DB::table('audits')
-            ->select(DB::raw('MAX(id) as id'))->where('auditable_type', 'Horsefly\\Sale')
+        // The latest "rejected" audit per sale, as one derived table joined by id (P-02).
+        $latestRejectAudit = DB::table('audits')
+            ->selectRaw('MAX(id) AS id, auditable_id')
+            ->where('auditable_type', 'Horsefly\\Sale')
             ->whereIn('message', ['sale-rejected', 'reject'])
-            ->whereIn('auditable_id', function ($query) {
-                $query->select('id')
-                    ->from('sales'); // Ensure we only consider rejected sales
-            })
             ->groupBy('auditable_id');
 
         $model = Sale::query()
@@ -2207,7 +2200,7 @@ class SaleController extends Controller
                 'offices.office_name as office_name',
                 'units.unit_name as unit_name',
                 'users.name as user_name',
-                'audits.created_at as rejected_date'
+                'rejected_audits.created_at as rejected_date'
             ])
             ->where('sales.status', 3) // rejected sales
             ->whereNull('sales.deleted_at')
@@ -2217,13 +2210,10 @@ class SaleController extends Controller
             ->leftJoin('offices', 'sales.office_id', '=', 'offices.id')
             ->leftJoin('units', 'sales.unit_id', '=', 'units.id')
             ->leftJoin('users', 'sales.user_id', '=', 'users.id')
-            // Join only the latest audit for each sale
-            ->leftJoin('audits', function ($join) use ($latestAuditSub) {
-                $join->on('audits.auditable_id', '=', 'sales.id')->where('audits.auditable_type', '=', 'Horsefly\\Sale')
-                    ->whereIn('message', ['sale-rejected', 'reject'])
-                    ->whereIn('audits.id', $latestAuditSub);
-            })
-            ->with(['jobTitle', 'jobCategory', 'unit', 'office', 'user'])
+            // Join only the latest "rejected" audit for each sale
+            ->leftJoinSub($latestRejectAudit, 'latest_reject_audit_ids', 'latest_reject_audit_ids.auditable_id', '=', 'sales.id')
+            ->leftJoin('audits as rejected_audits', 'rejected_audits.id', '=', 'latest_reject_audit_ids.id')
+            ->with(['jobTitle', 'jobCategory'])      // the only relations the rows use (the rest are joined)
             ->leftJoin(DB::raw("
                 (SELECT sale_id, MAX(id) AS latest_id
                 FROM sale_notes
@@ -2232,7 +2222,9 @@ class SaleController extends Controller
 
             // Join the actual sale_notes record
             ->leftJoin('sale_notes AS updated_notes', 'updated_notes.id', '=', 'latest_notes.latest_id')
-            ->selectRaw(DB::raw("(SELECT COUNT(*) FROM cv_notes WHERE cv_notes.sale_id = sales.id AND cv_notes.status = 1) as no_of_sent_cv"));
+            ->leftJoinSub(DB::table('cv_notes')->selectRaw('sale_id, COUNT(*) AS cv_count')->where('status', 1)->groupBy('sale_id'),
+                'cv_counts', 'cv_counts.sale_id', '=', 'sales.id')   // one grouped count, not a subquery per row
+            ->addSelect(DB::raw('COALESCE(cv_counts.cv_count, 0) AS no_of_sent_cv'));
 
         $hidePrivateDataSetting = Setting::where('key', 'hide_private_data')->value('value');
 
