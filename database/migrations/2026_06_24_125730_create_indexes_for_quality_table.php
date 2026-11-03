@@ -12,7 +12,9 @@ return new class extends Migration
         // applicants — WHERE status = 1 (filters the entire base query)
         // ---------------------------------------------------------------
         Schema::table('applicants', function (Blueprint $table) {
-            $table->index(['status', 'id'], 'idx_applicants_status_id');
+            if (!Schema::hasIndex('applicants', 'idx_applicants_status_id')) {   // guard (M-06)
+                $table->index(['status', 'id'], 'idx_applicants_status_id');
+            }
         });
 
         // ---------------------------------------------------------------
@@ -20,10 +22,12 @@ return new class extends Migration
         // ORDER BY id DESC, filtered by moved_tab_to
         // ---------------------------------------------------------------
         Schema::table('quality_notes', function (Blueprint $table) {
-            $table->index(
-                ['moved_tab_to', 'applicant_id', 'sale_id', 'id'],
-                'idx_qn_tab_applicant_sale_id'
-            );
+            if (!Schema::hasIndex('quality_notes', 'idx_qn_tab_applicant_sale_id')) {   // guard (M-06)
+                $table->index(
+                    ['moved_tab_to', 'applicant_id', 'sale_id', 'id'],
+                    'idx_qn_tab_applicant_sale_id'
+                );
+            }
         });
 
         // ---------------------------------------------------------------
@@ -31,15 +35,19 @@ return new class extends Migration
         // ORDER BY id DESC/ASC, filtered by status
         // ---------------------------------------------------------------
         Schema::table('cv_notes', function (Blueprint $table) {
-            $table->index(
-                ['status', 'applicant_id', 'sale_id', 'id'],
-                'idx_cn_status_applicant_sale_id'
-            );
+            if (!Schema::hasIndex('cv_notes', 'idx_cn_status_applicant_sale_id')) {   // guard (M-06)
+                $table->index(
+                    ['status', 'applicant_id', 'sale_id', 'id'],
+                    'idx_cn_status_applicant_sale_id'
+                );
+            }
             // For earliestCvNoteSubquery (no status filter)
-            $table->index(
-                ['applicant_id', 'sale_id', 'id'],
-                'idx_cn_applicant_sale_id'
-            );
+            if (!Schema::hasIndex('cv_notes', 'idx_cn_applicant_sale_id')) {   // guard (M-06)
+                $table->index(
+                    ['applicant_id', 'sale_id', 'id'],
+                    'idx_cn_applicant_sale_id'
+                );
+            }
         });
 
         // ---------------------------------------------------------------
@@ -47,10 +55,12 @@ return new class extends Migration
         // filtered by sub_stage + status
         // ---------------------------------------------------------------
         Schema::table('history', function (Blueprint $table) {
-            $table->index(
-                ['sub_stage', 'status', 'applicant_id', 'sale_id', 'id'],
-                'idx_history_substage_status_applicant_sale'
-            );
+            if (!Schema::hasIndex('history', 'idx_history_substage_status_applicant_sale')) {   // guard (M-06)
+                $table->index(
+                    ['sub_stage', 'status', 'applicant_id', 'sale_id', 'id'],
+                    'idx_history_substage_status_applicant_sale'
+                );
+            }
         });
 
         // ---------------------------------------------------------------
@@ -58,28 +68,36 @@ return new class extends Migration
         // filtered by stage
         // ---------------------------------------------------------------
         Schema::table('revert_stages', function (Blueprint $table) {
-            $table->index(
-                ['stage', 'applicant_id', 'sale_id', 'id'],
-                'idx_revert_stage_applicant_sale_id'
-            );
+            if (!Schema::hasIndex('revert_stages', 'idx_revert_stage_applicant_sale_id')) {   // guard (M-06)
+                $table->index(
+                    ['stage', 'applicant_id', 'sale_id', 'id'],
+                    'idx_revert_stage_applicant_sale_id'
+                );
+            }
         });
 
         // ---------------------------------------------------------------
         // sales — joined on sales.id, office_id, unit_id
         // ---------------------------------------------------------------
         Schema::table('sales', function (Blueprint $table) {
-            $table->index(['office_id', 'unit_id'], 'idx_sales_office_unit');
+            if (!Schema::hasIndex('sales', 'idx_sales_office_unit')) {   // guard (M-06)
+                $table->index(['office_id', 'unit_id'], 'idx_sales_office_unit');
+            }
         });
     }
 
     public function down(): void
     {
-        Schema::table('applicants',    fn($t) => $t->dropIndex('idx_applicants_status_id'));
-        Schema::table('quality_notes', fn($t) => $t->dropIndex('idx_qn_tab_applicant_sale_id'));
-        Schema::table('cv_notes',      fn($t) => $t->dropIndex('idx_cn_status_applicant_sale_id'));
-        Schema::table('cv_notes',      fn($t) => $t->dropIndex('idx_cn_applicant_sale_id'));
-        Schema::table('history',       fn($t) => $t->dropIndex('idx_history_substage_status_applicant_sale'));
-        Schema::table('revert_stages', fn($t) => $t->dropIndex('idx_revert_stage_applicant_sale_id'));
-        Schema::table('sales',         fn($t) => $t->dropIndex('idx_sales_office_unit'));
+        foreach ([
+            ['applicants', 'idx_applicants_status_id'],
+            ['quality_notes', 'idx_qn_tab_applicant_sale_id'],
+            ['cv_notes', 'idx_cn_status_applicant_sale_id'],
+            ['cv_notes', 'idx_cn_applicant_sale_id'],
+            ['history', 'idx_history_substage_status_applicant_sale'],
+            ['revert_stages', 'idx_revert_stage_applicant_sale_id'],
+            ['sales', 'idx_sales_office_unit'],
+        ] as [$table, $index]) {
+            \App\Support\SchemaIndex::dropIfExists($table, $index);
+        }
     }
 };

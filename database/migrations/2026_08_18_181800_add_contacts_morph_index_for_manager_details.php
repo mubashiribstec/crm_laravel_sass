@@ -25,13 +25,13 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('contacts', function (Blueprint $table) {
-            try {
-                $table->dropIndex('idx_contacts_type_id_id');
-            } catch (\Throwable $e) {
-                // already gone
-            }
-        });
+        // A try/catch inside the Blueprint closure never caught anything (the drop runs after it):
+        // guard with hasIndex so a rollback works when an index is already gone.
+        foreach ([
+            ['contacts', 'idx_contacts_type_id_id'],
+        ] as [$table, $index]) {
+            \App\Support\SchemaIndex::dropIfExists($table, $index);
+        }
     }
 
     private function indexExists(string $table, string $indexName): bool

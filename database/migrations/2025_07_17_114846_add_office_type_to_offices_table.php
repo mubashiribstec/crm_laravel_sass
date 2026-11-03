@@ -9,9 +9,10 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('offices', function (Blueprint $table) {
-            $table->string('office_type', 50)->nullable()->after('office_name'); // adjust 'after' as needed
-
-            $table->index('office_type');
+            if (!Schema::hasColumn('offices', 'office_type')) {   // guard: a partial migrate or hand-made column (M-08)
+                $table->string('office_type', 50)->nullable()->after('office_name');
+                $table->index('office_type');
+            }
         });
     }
 

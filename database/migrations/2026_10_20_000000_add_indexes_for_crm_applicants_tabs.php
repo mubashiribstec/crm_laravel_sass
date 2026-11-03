@@ -73,9 +73,7 @@ return new class extends Migration
 
         foreach ($indexes as $tableName => $indexNames) {
             foreach ($indexNames as $indexName) {
-                if ($this->indexExists($tableName, $indexName)) {
-                    Schema::table($tableName, fn (Blueprint $t) => $t->dropIndex($indexName));
-                }
+                \App\Support\SchemaIndex::dropIfExists($tableName, $indexName);   // handles FK-backing indexes
             }
         }
     }
