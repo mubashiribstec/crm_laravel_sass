@@ -34,6 +34,8 @@ evidence is specific and I have no reason to doubt it, but I didn't re-run it.
 | N-04 | P1 | CVs are **public static files** with guessable names (`uploads/resume/YYYY/MM/DD/<original name>_<unix time>.ext`), downloadable without logging in. This breaks UK GDPR data minimisation | Store new CVs privately with random names behind a permissioned download route; move existing files with a command; nginx denies the old path |
 | N-05 | P1 | `.env.example` carries `APP_DEBUG=true`, `APP_ENV=local` and test-machine values (`APP_URL`, `XPLOGENT_BASE_URL`, `DB_HOST=127.0.0.1` against its own comment). Copied to production, an error page shows secrets | Safe defaults (`APP_DEBUG=false`, `production`), placeholders, comments for local use |
 | N-06 | P1 | CI tests only MariaDB, while the Docker setup runs MySQL 8.0. M-01 fails only on MySQL 8, which is why CI never caught it | Add a MySQL 8.0 job beside MariaDB |
+| N-07 | P1 | *(found in batch 3)* `composer audit` lists 63 advisories in the locked packages (Laravel 12.17, Guzzle, PhpSpreadsheet, league/commonmark, Symfony…). The critical ones don't apply as used here: no `token` auth guard is configured, and imports read Laravel's temporary upload path, not a file name the user chooses | `composer update` within the current version ranges (Laravel 12.17 → 12.70, ~100 packages), as its own change with a full regression pass. Not done in batch 3: too wide to slip in |
+| N-08 | P2 | *(found in batch 3)* The **Open CVs** tab's "Send request" item calls `crmSendRequestModal()`, which doesn't exist in `crm/list.blade.php`, so the button does nothing (the **Sent CV** tab's version works) | Point it at `crmSentCvToRequestModal`, after checking with the recruiters how it should behave |
 
 Production runs on **MariaDB** (owner's answer). M-01 therefore doesn't break production, but it does
 break the Docker setup (MySQL 8). It gets fixed either way.
@@ -196,3 +198,80 @@ X-01. Tested on MariaDB and MySQL 8, both locally and in CI.
 - X-17 (owner question 2);
 - X-06 and X-11 (features, P2);
 - the other P2s in the backlog.
+
+### Batch 3: done (the other CRM P1s)
+| Finding | Commit | What changed |
+|---|---|---|
+| B-02, B-03, B-04 | `dd33e73` | CRM reverts with nothing to revert to roll back and answer 409; Send CV to quality checks the job title, rolls back at the CV limit, and its refusals say why (422) even with `APP_DEBUG=false`. |
+| L-05, B-05 | `a0b3e80` | The sale form validates `cv_limit` (1–127) and its ids; postcode lookups lowercase their value. |
+| B-06, L-04, B-07 | `6fd312e` | Sale notes, sale status, hold and applicant status are validated and transactional; pending approval only for a sale waiting for it; `edit` 404s for an unknown sale. |
+| B-08 | `64e5058` | The operator-precedence fix in the 12 CV-link guards. |
+| L-01 | `4741f33` | The radius screen honours the ticked job titles. |
+| L-03 | `f4edaae` | The dashboard counts use the Resources tabs' own buckets (`App\Support\ApplicantAgeWindows`). |
+| L-06 | `7ee9dd9` | `ACOS` is clamped in all 11 distance formulas, so a candidate at ~0 km isn't dropped. |
+| R-03 to R-06 | `40660c9` | No dead routes or duplicate names; login/logout only through `LoginController`, logout is POST; the hold change is POST; unknown addresses are 404 (were 500). |
+| (tests) | `ec1103d` | The whole suite passes and CI runs all of it. |
+| M-02 to M-05, M-09, M-11, M-12 | `067eb0a`, `e9398ff` | New guarded migrations (details in the commit); the data fixes keep each row's `updated_at`. |
+| M-06 to M-08 | `82704f8` | Guards for partial installs; `migrate:reset` now works on MariaDB and MySQL 8. |
+| S-03 to S-05 | `5e731e7` | Seeders are safe to run twice and never overwrite real values; regions and the vacancy-email template are seeded. |
+| P-01 to P-04 | `ee7c4bf`, `b570e95`, `6c0610d`, `2733a8e` | A bounding box and an index for the radius search; lighter direct/rejected sale lists (same rows); the portal feed pages on request and is rate-limited; CRM tables check each permission once per request. |
+| N-04 | `d1cee59` | CVs are private (details below). |
+| OV-01 | `be0a5ae` | PHP 8.3 and Node 22 LTS (composer.json, Dockerfile); CVs are kept out of Docker images. |
+| R-02 (rest) | `7dab6a3` | Each CRM action needs the permission its button already checks (below). |
+
+**N-04, how CVs work now**
+- New uploads go to `storage/app/private/resumes/YYYY/MM/<random>.<ext>`, outside the web root.
+- Every CV icon links to `GET applicants/{id}/cv/{original|updated}`: signed in, one of the CV
+  permissions, and a blocked applicant's CV also needs `applicant-show-blocked-data`. PDFs open in
+  the browser; anything else downloads.
+- The permission list is the five download permissions **plus** the page permissions of the lists
+  that showed the icon without a download check (sales radius, quality resources, regions,
+  category-wise and no-job resources). Nobody loses a CV they could open before. To make the
+  download permissions the only way in, remove the page permissions from
+  `ApplicantCvController::DOWNLOAD_PERMISSIONS`.
+- Older CVs keep working from `public/uploads/resume` through the same route until
+  `php artisan cv:move-to-private` moves them. The command copies, checks, updates the row (keeping
+  `updated_at`), then removes the public copy. `--dry-run` lists the work, missing files are
+  reported, and it is safe to run again.
+- `docker/nginx.conf` and `public/.htaccess` refuse `/uploads/resume/`. For a hand-configured
+  nginx, add `location ^~ /uploads/resume/ { return 404; }`. This is safe straight away: links no
+  longer point there.
+
+**CRM per-action permissions:** add note, send request, schedule interview (or send
+confirmation), revert request, revert, revert in quality, and the accept permissions for
+confirmation, rebook, attended and start date. The pairing was read from the tabs' buttons and
+their modals' forms. The three "no response" actions have a button with no permission check, so
+they stay on `crm-index`.
+
+**Where the fix differs from the audit, and why**
+- **B-05:** "the lookup never matches" doesn't hold on this CRM's case-insensitive collation
+  (`utf8mb4_unicode_ci`). The value is lowercased anyway, as hardening.
+- **L-03:** muse suggested literal "last N days" windows. That would make the dashboard cards
+  disagree with the Resources tabs they are named after, whose windows are deliberately offset. Both
+  now share one helper; this fixes a one-day error and an unbounded "3 months".
+- **M-10:** no change. Users, offices, units and sales are soft-deleted, so the RESTRICT foreign
+  keys never fire.
+- **M-11:** MySQL's `boolean` is `tinyint(1)` and did store 2. The bug was the model's `boolean`
+  cast, which read "pending" as "yes". The cast is now `integer` and the column an explicit
+  `tinyInteger`.
+- **S-06:** already fixed in batch 1. The seeder finds the admin by email, not by id 1.
+- **Status and hold permissions:** commit `6fd312e` said `changeSaleStatus` and
+  `changeSaleHoldStatus` had no permission check. They did (further down the constructor), so my
+  duplicate lines were removed in `fd6f2d6`.
+- **Beyond the audit:**
+  - rollback was broken in more migrations than listed (`82704f8`);
+  - the theme's catch-all route gave 500 for unknown addresses (now 404);
+  - three CRM actions rolled back a transaction they never opened (`7dab6a3`).
+
+**Your actions after batch 3:**
+- `php artisan migrate`.
+- `php artisan cv:move-to-private` (first with `--dry-run`).
+- If your server's nginx isn't the bundled `docker/nginx.conf`, add the `/uploads/resume/` rule
+  above.
+- PHP 8.3 on the server.
+
+**Still open:**
+- N-07 (dependency updates, proposed as the next change);
+- N-08;
+- X-17 (owner question 2);
+- the P2 backlog.
