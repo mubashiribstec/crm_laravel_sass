@@ -195,4 +195,15 @@ class Batch3Test extends XplogentTestCase
             }
         }
     }
+
+    // ── L-06: haversine at distance ~0 ───────────────────────────────────────
+    public function test_a_candidate_at_the_vacancys_exact_location_is_not_dropped(): void
+    {
+        // For these coordinates the unclamped ACOS argument rounds to just over 1 (NULL in MySQL).
+        $sale = $this->sale(['lat' => 50.034, 'lng' => -4.762]);
+        $here = $this->applicant(['lat' => 50.034, 'lng' => -4.762]);
+        $ids = array_column($this->signed('/api/xplogent/campaigns/queue', ['sale_id' => $sale->id])
+            ->assertOk()->json('candidates'), 'applicant_id');
+        $this->assertSame([$here->id], $ids);
+    }
 }

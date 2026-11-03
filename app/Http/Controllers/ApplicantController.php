@@ -2788,8 +2788,8 @@ class ApplicantController extends Controller
                 'units.unit_name as unit_name',
                 'users.name as user_name',
 
-                DB::raw("((ACOS(SIN($lat * PI() / 180) * SIN(sales.lat * PI() / 180) + 
-                        COS($lat * PI() / 180) * COS(sales.lat * PI() / 180) * COS(($lon - sales.lng) * PI() / 180)) * 180 / PI()) * 60 * 1.1515) AS distance"),
+                DB::raw("((ACOS(LEAST(1, GREATEST(-1, SIN($lat * PI() / 180) * SIN(sales.lat * PI() / 180) + 
+                        COS($lat * PI() / 180) * COS(sales.lat * PI() / 180) * COS(($lon - sales.lng) * PI() / 180)))) * 180 / PI()) * 60 * 1.1515) AS distance"),
 
                 DB::raw("(SELECT COUNT(*) FROM cv_notes WHERE cv_notes.sale_id = sales.id AND cv_notes.status = 1) AS no_of_sent_cv"),
 
@@ -3255,8 +3255,8 @@ class ApplicantController extends Controller
                 'offices.office_name as office_name',
                 'units.unit_name as unit_name',
                 'users.name as user_name',
-                DB::raw("((ACOS(SIN($lat * PI() / 180) * SIN(sales.lat * PI() / 180) + 
-                        COS($lat * PI() / 180) * COS(sales.lat * PI() / 180) * COS(($lon - sales.lng) * PI() / 180)) * 180 / PI()) * 60 * 1.1515) 
+                DB::raw("((ACOS(LEAST(1, GREATEST(-1, SIN($lat * PI() / 180) * SIN(sales.lat * PI() / 180) + 
+                        COS($lat * PI() / 180) * COS(sales.lat * PI() / 180) * COS(($lon - sales.lng) * PI() / 180)))) * 180 / PI()) * 60 * 1.1515) 
                         AS distance"),
                 DB::raw("(SELECT COUNT(*) FROM cv_notes WHERE cv_notes.sale_id = sales.id AND cv_notes.status = 1) as no_of_sent_cv"),
 

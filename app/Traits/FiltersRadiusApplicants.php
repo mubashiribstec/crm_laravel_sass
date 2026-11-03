@@ -242,7 +242,7 @@ trait FiltersRadiusApplicants
             ->whereBetween('applicants.lat', [$lat - $deltaLat, $lat + $deltaLat])
             ->whereBetween('applicants.lng', [$lng - $deltaLng, $lng + $deltaLng])
             ->whereRaw(
-                '(6371 * acos(cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))) <= ?',
+                '(6371 * acos(LEAST(1, GREATEST(-1, cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))))) <= ?',
                 [$lat, $lng, $lat, $radiusKm]
             );
     }

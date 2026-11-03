@@ -939,7 +939,7 @@ class ResourceController extends Controller
             ->where(function ($q) use ($salesData, $radius) {
                 foreach ($salesData as $sale) {
                     $q->orWhereRaw(
-                        '(6371 * acos(cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))) <= ?',
+                        '(6371 * acos(LEAST(1, GREATEST(-1, cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))))) <= ?',
                         [$sale->lat, $sale->lng, $sale->lat, $radius]
                     );
                 }
@@ -1272,7 +1272,7 @@ class ResourceController extends Controller
             ->leftJoin('job_sources', 'applicants.job_source_id', '=', 'job_sources.id')
             ->leftJoin('users', 'module_notes.user_id', '=', 'users.id')
             ->whereRaw(
-                '(6371 * acos(cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))) <= ?',
+                '(6371 * acos(LEAST(1, GREATEST(-1, cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat)))))) <= ?',
                 [$lat, $lng, $lat, $radius]
             );
 

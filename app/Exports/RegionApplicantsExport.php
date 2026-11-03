@@ -275,13 +275,13 @@ class RegionApplicantsExport implements FromCollection, WithHeadings
 
         $query->selectRaw("
             (
-                6371 * acos(
+                6371 * acos(LEAST(1, GREATEST(-1, 
                     cos(radians(?))
                     * cos(radians(applicants.lat))
                     * cos(radians(applicants.lng) - radians(?))
                     + sin(radians(?))
                     * sin(radians(applicants.lat))
-                )
+                )))
             ) AS distance
         ", [$latitude, $longitude, $latitude]);
 

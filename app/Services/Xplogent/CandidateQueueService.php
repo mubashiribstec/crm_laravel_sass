@@ -24,7 +24,7 @@ class CandidateQueueService
     use FiltersRadiusApplicants;
 
     /** The haversine distance in km from (?, ?) to the applicant; bind [lat, lng, lat]. */
-    public const DISTANCE_SQL = '(6371 * acos(cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat))))';
+    public const DISTANCE_SQL = '(6371 * acos(LEAST(1, GREATEST(-1, cos(radians(?)) * cos(radians(applicants.lat)) * cos(radians(applicants.lng) - radians(?)) + sin(radians(?)) * sin(radians(applicants.lat))))))';
 
     /** job_title ids an applicant may have: the sale's own title plus its related_titles. */
     public function titleIds(Sale $sale): array

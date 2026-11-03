@@ -97,8 +97,8 @@ class CommunicationController extends Controller
                 lng,
                 applicant_email,
                 applicant_email_secondary,
-                ((ACOS(SIN($lat * PI() / 180) * SIN(lat * PI() / 180) + 
-                COS($lat * PI() / 180) * COS(lat * PI() / 180) * COS(($lon - lng) * PI() / 180)) * 180 / PI()) * 60 * 1.852) AS distance
+                ((ACOS(LEAST(1, GREATEST(-1, SIN($lat * PI() / 180) * SIN(lat * PI() / 180) + 
+                COS($lat * PI() / 180) * COS(lat * PI() / 180) * COS(($lon - lng) * PI() / 180)))) * 180 / PI()) * 60 * 1.852) AS distance
             "))
             ->having("distance", "<", $radius)
             ->orderBy("distance")
