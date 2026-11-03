@@ -10,6 +10,7 @@ use Horsefly\Contact;
 use Horsefly\ModuleNote;
 use Horsefly\JobSource;
 use Horsefly\Setting;
+use App\Support\DocumentStorage;
 
 use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\Controller;
@@ -112,7 +113,7 @@ class HeadOfficeController extends Controller
             'contact_note' => 'nullable|array',
             'contact_note.*' => 'nullable|string',
             'attachments' => 'nullable|array',
-            'attachments.*' => 'file|max:10240',
+            'attachments.*' => DocumentStorage::rule(),   // documents and images only (N-10)
         ]);
 
         if ($validator->fails()) {
@@ -220,7 +221,7 @@ class HeadOfficeController extends Controller
         } catch (\Exception $e) {
             Log::error('Error creating head office: ' . $e->getMessage());
             DB::rollBack();
-            File::delete(array_map('public_path', $storedDocumentPaths));
+            array_map([DocumentStorage::class, 'delete'], $storedDocumentPaths);
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while creating the head office. Please try again.'
@@ -779,7 +780,7 @@ class HeadOfficeController extends Controller
             'contact_note' => 'nullable|array',
             'contact_note.*' => 'nullable|string',
             'attachments' => 'nullable|array',
-            'attachments.*' => 'file|max:10240',
+            'attachments.*' => DocumentStorage::rule(),   // documents and images only (N-10)
         ]);
 
         if ($validator->fails()) {
@@ -905,7 +906,7 @@ class HeadOfficeController extends Controller
         } catch (\Exception $e) {
             Log::error('Error updating head office: ' . $e->getMessage());
             DB::rollBack();
-            File::delete(array_map('public_path', $storedDocumentPaths));
+            array_map([DocumentStorage::class, 'delete'], $storedDocumentPaths);
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while updating the head office. Please try again.'
@@ -935,8 +936,8 @@ class HeadOfficeController extends Controller
                 return [
                     'name' => $document->document_name,
                     'size' => $document->document_size,
-                    'mime_type' => File::exists(public_path($document->document_path))
-                        ? mime_content_type(public_path($document->document_path))
+                    'mime_type' => ($file = DocumentStorage::existingPath($document->document_path))
+                        ? mime_content_type($file)
                         : null,
                     'url' => route('head-offices.documents.show', [
                         'id' => $office->id,
@@ -952,9 +953,9 @@ class HeadOfficeController extends Controller
         abort_unless(Gate::any(['office-view', 'office-edit']), 403);
 
         $document = Office::findOrFail($id)->documents()->withTrashed()->findOrFail($documentId);
-        $path = public_path($document->document_path);
+        $path = DocumentStorage::existingPath($document->document_path);
 
-        abort_unless(File::exists($path), 404);
+        abort_unless($path !== null, 404);
 
         $mimeType = mime_content_type($path) ?: 'application/octet-stream';
         if (in_array($mimeType, ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'], true)) {
@@ -993,7 +994,7 @@ class HeadOfficeController extends Controller
     public function restoreDocument($id, $documentId)
     {
         $document = Office::findOrFail($id)->documents()->onlyTrashed()->findOrFail($documentId);
-        abort_unless(File::exists(public_path($document->document_path)), 410, 'The attachment file has already been permanently deleted.');
+        abort_unless(DocumentStorage::exists($document->document_path), 410, 'The attachment file has already been permanently deleted.');
 
         DB::transaction(function () use ($document) {
             $document->delete_reason = null;
@@ -1010,16 +1011,13 @@ class HeadOfficeController extends Controller
 
     private function storeOfficeDocuments(Request $request, Office $office, array &$storedPaths): void
     {
+        // Private storage, random name, the validated extension (N-10): the file is reachable only
+        // through the permission-checked office documents route.
         foreach ($request->file('attachments', []) as $attachment) {
+            $extension = strtolower($attachment->getClientOriginalExtension());
             $originalName = $attachment->getClientOriginalName();
             $size = $attachment->getSize();
-            $extension = $attachment->guessExtension();
-            $filename = Str::uuid() . ($extension ? '.' . $extension : '');
-            $dateFolder = Carbon::now()->format('Y/m/d');
-            $directory = public_path('uploads/docs/' . $dateFolder);
-            File::ensureDirectoryExists($directory, 0755, true);
-            $attachment->move($directory, $filename);
-            $path = 'uploads/docs/' . $dateFolder . '/' . $filename;
+            $path = DocumentStorage::store($attachment, $extension);
 
             $storedPaths[] = $path;
             $office->documents()->create([
