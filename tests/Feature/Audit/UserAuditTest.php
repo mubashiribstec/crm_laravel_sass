@@ -12,6 +12,7 @@ use Tests\Feature\Xplogent\XplogentTestCase;
  * N-11 (docs/audit/2026-11-03-audit-review.md): a user's audit row says a password, remember
  * token or SIP password changed, never what to; older rows are cleaned by a migration; a change
  * made with nobody signed in (console, queue) is still recorded instead of failing.
+ * N-12: the activity log shows saved values as text and web links, never as markup or script.
  */
 class UserAuditTest extends XplogentTestCase
 {
@@ -95,5 +96,41 @@ class UserAuditTest extends XplogentTestCase
         $this->assertStringNotContainsString($hash, $row->data);
         $this->assertSame('2026-10-01 09:00:00', (string) $row->updated_at);
         $this->assertStringContainsString('not a user', DB::table('audits')->find($other)->data);  // other models untouched
+    }
+
+    public function test_the_activity_log_shows_saved_values_without_running_them(): void
+    {
+        $admin = $this->staff('Ada Admin', 'administrator-user-activity-log');
+        DB::table('audits')->insert(['user_id' => $admin->id, 'auditable_id' => 1, 'auditable_type' => 'Horsefly\\Office',
+            'message' => 'Office updated', 'created_at' => now(), 'updated_at' => now(),
+            'data' => json_encode(json_encode(['id' => 1, 'changes_made' => [
+                'office_website' => "http://x.test/'onmouseover='alert(1)",
+                'office_notes' => '<b onmouseover="alert(2)">bold</b> and <img src=x onerror=alert(3)>',
+                'office_link' => 'javascript://x.test/%0aalert(4)',
+                'office_page' => 'https://example.org/a?b=1&c=2',
+            ]]))]);
+
+        $details = $this->actingAs($admin)->postJson('/getUserActivityLogs', ['id' => $admin->id, 'draw' => 1],
+            ['X-Requested-With' => 'XMLHttpRequest'])->assertOk()->json('data.0.details');
+
+        $dom = new \DOMDocument();
+        @$dom->loadHTML('<?xml encoding="utf-8"?><div>' . $details . '</div>');
+        $hrefs = [];
+        foreach ((new \DOMXPath($dom))->query('//*') as $el) {
+            foreach ($el->attributes as $attr) {
+                $this->assertStringStartsNotWith('on', strtolower($attr->name), "<{$el->nodeName} {$attr->name}> in: {$details}");
+                if ($attr->name === 'href') {
+                    $hrefs[] = $attr->value;
+                }
+            }
+            $this->assertNotSame('img', $el->nodeName);
+        }
+        foreach ($hrefs as $href) {                                              // web links only
+            $this->assertMatchesRegularExpression('#^(https?://|\#$)#', $href);
+        }
+        $this->assertContains('https://example.org/a?b=1&c=2', $hrefs);
+        $this->assertContains("http://x.test/'onmouseover='alert(1)", $hrefs);  // one escaped value, no new attribute
+        $this->assertStringNotContainsString('javascript:', implode(' ', $hrefs));
+        $this->assertStringContainsString('<b>bold</b>', $details);              // formatting kept, attributes not
     }
 }
