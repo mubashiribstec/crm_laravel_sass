@@ -36,6 +36,12 @@ evidence is specific and I have no reason to doubt it, but I didn't re-run it.
 | N-06 | P1 | CI tests only MariaDB, while the Docker setup runs MySQL 8.0. M-01 fails only on MySQL 8, which is why CI never caught it | Add a MySQL 8.0 job beside MariaDB |
 | N-07 | P1 | *(found in batch 3)* `composer audit` lists 63 advisories in the locked packages (Laravel 12.17, Guzzle, PhpSpreadsheet, league/commonmark, Symfony…). The critical ones don't apply as used here: no `token` auth guard is configured, and imports read Laravel's temporary upload path, not a file name the user chooses | **Fixed in `21a72d7`:** `composer update` within the current version ranges (94 packages, Laravel 12.17 → 12.70.2). `composer audit` now lists none |
 | N-08 | P2 | *(found in batch 3)* The **Open CVs** tab's "Send request" item calls `crmSendRequestModal()`, which doesn't exist in `crm/list.blade.php`, so the button does nothing (the **Sent CV** tab's version works) | **Fixed in `091e848`:** it opens the Sent CV tab's request dialog with `tab=open_cv`, which `crmSendRequest` already handles |
+| N-10 | P1 | *(main's new attachments, `b0b382d`)* Office and unit attachments accept **any file type** (`file|max:10240`) and are saved as `public/uploads/docs/Y/m/d/<uuid>.<guessed extension>`, inside the web root: downloadable without logging in if a link leaks, and a script there is refused only by the bundled nginx config, not by Apache | **Fixed in `e7628ee`:** documents and images only (pdf, doc(x), xls(x), csv, txt, jpg, png, gif, webp), stored in `storage/app/private/documents/` with random names, served only by the existing permission-checked routes; `php artisan documents:move-to-private` moves the older ones; nginx and `.htaccess` refuse `/uploads/docs/` |
+| N-11 | P1 | *(found in the merge's smoke test; predates main)* `UserObserver::updated` copies every changed column into the audit row, so a password change stores the **new bcrypt hash** (and the remember token, and the SIP password's ciphertext) in `audits.data`, which Users → Activity log shows. A user change made with nobody signed in (console, queue) failed: `audits.user_id` is required | **Fixed in `2f8249c`:** "(changed)" instead of the value; a remember-token-only change isn't audited; console changes are attributed to the changed user; a migration cleans the existing rows |
+| N-12 | P1 | *(same)* The activity log puts any value that passes `FILTER_VALIDATE_URL` into `<a href='…'>` unescaped, and that filter accepts quotes and `javascript://` links; other values keep the attributes of the allowed formatting tags. **Stored XSS** against admins, from any value a user can save on an audited record | **Fixed in `fc4a111`:** links only for escaped http(s) addresses, formatting tags without attributes, status labels escaped |
+| N-13 | P1 | *(same)* Signing in to an active account with **no role** is a 500: `PermissionHelper` redirects to `route('no-permission')`, which doesn't exist. That's the state of every approved sign-up (R-01) until an admin gives it a role | **Fixed in `29ce199`:** a "No access yet" page with a sign-out button |
+| N-14 | P2 | *(same)* `HeadOfficeController` (store) reads `contact_phone` / `contact_landline` / `contact_note` by index without checking they were sent, though validation marks them optional: a request without them is a 500. The office form always sends them | Read them with `data_get(..., $index)`; check `UnitController` too |
+| N-15 | P2 | *(same)* `resources/js/app.js` creates the chat and email offcanvas panels on every page; on pages that don't have them (the login page, among others) that handler throws "reading 'backdrop'". Nothing else breaks | Create them only when the elements exist |
 | N-09 | P2 | *(found after batch 3)* The CSV imports ignore the file's `id` column for offices (`'id'` is commented out of `Office::$fillable`), so imported offices get new ids. A units or sales file imported afterwards that refers to the old office ids then points at the wrong office | Decide whether the importer must keep legacy ids (allow `id` for the importer only, e.g. `forceFill`), and check the other models the importer writes |
 
 Production runs on **MariaDB** (owner's answer). M-01 therefore doesn't break production, but it does
@@ -159,6 +165,12 @@ gets re-checked as it is fixed.
 4. Still open from before:
    - make the repo private;
    - rotate the FreePBX and admin passwords in the git history.
+5. After deploying the merged code (in this order):
+   - `php artisan migrate` (if it stops at the `applicant_email_secodary` migration, see `SETUP.md`);
+   - `php artisan cv:move-to-private --dry-run`, then without `--dry-run`;
+   - `php artisan documents:move-to-private --dry-run`, then without `--dry-run`;
+   - with your own nginx config, the `/uploads/resume/` and `/uploads/docs/` rules from `SETUP.md`;
+   - accounts that signed up and were approved need a role, or they see "No access yet".
 
 ## 6. Progress
 
@@ -290,7 +302,37 @@ The PHP 8.3 image builds completely (PHP 8.3.36, Node 22.23, `pdftotext`, Larave
 compose stack was run end to end on MariaDB 11.8.9: migrate, seed, login page, CV folder
 blocked. A MySQL 8 dump loaded into it as `SETUP.md` describes.
 
+### Merging main (3 Nov)
+`main` had 10 new commits by Atif Qadeer (26 Oct to 2 Nov); `dev` hadn't moved. They were merged
+into `xplogent` (`3ec49c3`, a merge commit, no rebase):
+
+| main's work | How it was combined |
+|---|---|
+| `fcf9aa4` CRM table refactor (5,100 lines from `CrmController` into `app/Services/Crm/*`) | Main's structure kept. The action-level changes stay in the controller (constructor middleware, `ACTION_PERMISSIONS`, the B-02 reverts, the removed validation rollbacks); the menu changes moved to `CrmActionMenu` (Gate checks cached per request, P-04) and N-08's Open CVs button with escaped attributes. Its dialog was missing from `CrmActionModals::TAB_MODALS` (each tab renders only its own dialogs): added, with a test that every tab's buttons have their dialogs. All 56 buttons checked: same permission and action route as before the refactor |
+| `b0b382d` office and unit attachments | Kept, then N-10 above |
+| `bd7ef76`, `a909428`, `ab5858e` version history, footer | Kept (the settings page is under `administrator-setting-index`) |
+| `94cb1a0`, `50e0ca5`, `d65d81a` dashboard sales statistics | Kept beside `CvStorage` links and `ApplicantAgeWindows`; its queries use bound values |
+| `269d0e5`, `fe284c9` attendance added then removed | What remains (the CRM message alert, small `UserController` / `LoginController` edits) kept beside our login and logout |
+
+Checked:
+- the whole suite (97 tests) on MariaDB 11.8 and MySQL 8, after `migrate:fresh --seed` and a
+  second seed, and without built front-end assets;
+- **the upgrade path:** a database migrated and seeded by `main`'s code, then migrated by the
+  merged code (all 12 of its migrations at the time ran; N-11's, added later, ran on the live test
+  database; the typo-column migration stops on a conflicting
+  address, as designed, and copies a non-conflicting one). The other order (our migrations
+  first, then main's two) also works;
+- **live**, on `php artisan serve` with `APP_DEBUG=false`:
+  - sign-in and sign-out, and a role-less account landing on the no-access page;
+  - the dashboard and the sales-role statistics, with their detail list;
+  - all 19 CRM tabs, and Open CVs → Send Request opening its dialog in the page;
+  - an office with a PDF (stored privately, served to office staff, 403 without `office-view`,
+    sign-in page for guests) and with a `.php` (refused, 422);
+  - a CV download;
+- nginx (`docker/nginx.conf`): `/uploads/docs/…` and `/uploads/resume/…` answer 404, other static
+  files are served.
+
 **Still open:**
-- N-09;
+- N-09, N-14, N-15;
 - X-17 (owner question 2);
 - the P2 backlog.
