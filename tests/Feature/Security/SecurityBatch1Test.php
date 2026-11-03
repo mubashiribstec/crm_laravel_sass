@@ -29,14 +29,15 @@ class SecurityBatch1Test extends XplogentTestCase
 
         $first = $this->actingAs($staff)->postJson('/applicants/uploadCv', ['applicant_id' => $a->id,
             'resume' => UploadedFile::fake()->createWithContent('Sarah CV.pdf', '%PDF-1.4 one')])->assertOk()->json('file_path');
-        $this->assertMatchesRegularExpression('#^uploads/resume/\d{4}/\d{2}/\d{2}/Sarah_CV_\d+_[a-z0-9]{8}\.pdf$#', $first);
-        $this->assertFileExists(public_path($first));
+        // Private storage, random name (N-04; CvPrivacyTest covers the download side).
+        $this->assertMatchesRegularExpression('#^private/resumes/\d{4}/\d{2}/[a-z0-9]{40}\.pdf$#', $first);
+        $this->assertFileExists(storage_path('app/' . $first));
 
         $second = $this->actingAs($staff)->postJson('/applicants/uploadCv', ['applicant_id' => $a->id,
             'resume' => UploadedFile::fake()->createWithContent('new.docx', 'PK docx')])->assertOk()->json('file_path');
         $this->assertSame($second, $a->fresh()->applicant_cv);
-        $this->assertFileDoesNotExist(public_path($first));                 // replaced only after the new one is saved
-        File::delete(public_path($second));
+        $this->assertFileDoesNotExist(storage_path('app/' . $first));       // replaced only after the new one is saved
+        File::delete(storage_path('app/' . $second));
 
         $this->actingAs($this->staff('Nobody'))->postJson('/applicants/uploadCv', ['applicant_id' => $a->id])
             ->assertForbidden();

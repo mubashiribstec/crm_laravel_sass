@@ -21,6 +21,7 @@ use App\Http\Controllers\QualityController;
 use App\Http\Controllers\RegionController;
 use App\Http\Controllers\FreePBXController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ApplicantCvController;
 use App\Http\Controllers\DialLockController;
 use App\Http\Controllers\ImportController;
 use App\Http\Controllers\ScrapController;
@@ -100,6 +101,9 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
         Route::post('uploadCv', [ApplicantController::class, 'uploadCv'])->name('applicants.uploadCv');
         Route::post('crmuploadCv', [ApplicantController::class, 'crmuploadCv'])->name('applicants.crmuploadCv');
         Route::get('{id}/history', [ApplicantController::class, 'history'])->name('applicants.history');
+        // CVs are not public files: this checks the login, the permission and the blocked rule.
+        Route::get('{id}/cv/{kind}', [ApplicantCvController::class, 'download'])
+            ->whereNumber('id')->whereIn('kind', ['original', 'updated'])->name('applicants.cv.download');
     });
 
     Route::get('getAvailableJobs', [ApplicantController::class, 'getAvailableJobs'])->name('getAvailableJobs');

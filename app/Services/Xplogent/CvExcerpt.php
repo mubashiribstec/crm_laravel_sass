@@ -2,6 +2,7 @@
 
 namespace App\Services\Xplogent;
 
+use App\Support\CvStorage;
 use Horsefly\Applicant;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -62,10 +63,15 @@ class CvExcerpt
 
     private function resolve(?string $stored): ?string
     {
+        // The two places the CRM keeps CVs (private storage, and the older public uploads)...
+        if (($path = CvStorage::existingPath($stored)) !== null) {
+            return $path;
+        }
         $stored = trim((string) $stored);
         if ($stored === '' || str_contains($stored, '..')) {
             return null;
         }
+        // ...and the shapes older imports left behind.
         foreach ([public_path($stored), public_path('storage/' . $stored), storage_path('app/public/' . $stored),
                      storage_path('app/' . $stored)] as $candidate) {
             if (is_file($candidate)) {

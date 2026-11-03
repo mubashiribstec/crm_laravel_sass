@@ -278,7 +278,8 @@ class Applicant extends Model
     }
     public function getFormattedCvAttribute()
     {
-        return $this->applicant_cv ? "<a href='" . asset('storage/' . $this->applicant_cv) . "' target='_blank'>View CV</a>" : 'No CV';
+        return \App\Support\CvStorage::exists($this->applicant_cv)
+            ? "<a href='" . e(\App\Support\CvStorage::url($this->id, 'original')) . "' target='_blank'>View CV</a>" : 'No CV';
     }
     public function getFormattedCreatedAtAttribute()
     {

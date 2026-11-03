@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Exceptions\ActionRefusedException;
 use App\Services\Xplogent\ApplicantStatusService;
 use Illuminate\Http\Request;
+use App\Support\CvStorage;
 
 // Import necessary models
 use Horsefly\Sale;
@@ -70,7 +71,6 @@ class ApplicantController extends Controller
         $this->middleware('permission:applicant-delete')->only(['destroy', 'changeStatus']);
         $this->middleware('permission:applicant-export,applicant-export-from-sale-page')->only(['export']);
         $this->middleware('permission:region-export')->only(['regionalApplicatsExport']);
-        $this->middleware('permission:applicant-download-resume')->only(['downloadCv']);
         $this->middleware('permission:applicant-upload-resume')->only(['uploadCv']);
         $this->middleware('permission:applicant-upload-crm-resume')->only(['crmuploadCv']);
         $this->middleware('permission:applicant-add-note')->only(['storeShortNotes', 'markApplicantNoNursingHome']);
@@ -271,36 +271,6 @@ class ApplicantController extends Controller
 
             $applicantData['applicant_notes'] = $applicant_notes = $request->applicant_notes . ' --- By: ' . Auth::user()->name . ' Date: ' . Carbon::now()->format('d-m-Y');
 
-            if ($request->hasFile('applicant_cv')) {
-                // Original name & extension
-                $filenameWithExt = $request->file('applicant_cv')->getClientOriginalName();
-                $filename = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-                $extension = $request->file('applicant_cv')->getClientOriginalExtension();
-
-                // Clean filename
-                $filename = preg_replace('/[\s-]+/', '_', trim($filename));
-
-                // Unique filename
-                $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-
-                // Directory: public/uploads/resume/YYYY/MM/DD
-                $year = now()->year;
-                $month = now()->format('m');
-                $day = now()->format('d');
-
-                $directory = "uploads/resume/{$year}/{$month}/{$day}";
-                $destinationPath = public_path($directory);
-
-                if (!File::exists($destinationPath)) {
-                    File::makeDirectory($destinationPath, 0755, true, true);
-                }
-
-                // Move file to public directory
-                $request->file('applicant_cv')->move($destinationPath, $fileNameToStore);
-
-                // Save relative path in DB (IMPORTANT)
-                $applicantData['applicant_cv'] = $directory . '/' . $fileNameToStore;
-            }
 
             $postcode = preg_replace('/\s+/', '', $request->applicant_postcode); // Remove spaces
 
@@ -343,6 +313,12 @@ class ApplicantController extends Controller
                     'success' => false,
                     'message' => 'Postcode location is required. Please provide a valid postcode.'
                 ], 400);
+            }
+
+            // Stored once the checks above have passed (private storage, random name; served
+            // only through applicants.cv.download).
+            if ($request->hasFile('applicant_cv')) {
+                $applicantData['applicant_cv'] = CvStorage::store($request->file('applicant_cv'));
             }
 
             $applicant = Applicant::create($applicantData);
@@ -479,6 +455,7 @@ class ApplicantController extends Controller
             ]);
         } catch (Exception $e) {
             DB::rollBack();
+            CvStorage::delete($applicantData['applicant_cv'] ?? null);
             Log::error('Error creating applicant: ' . $e->getMessage());
 
             return response()->json([
@@ -1005,54 +982,8 @@ class ApplicantController extends Controller
                 ->editColumn('updated_at', function ($applicant) {
                     return $applicant->formatted_updated_at; // Using accessor
                 })
-                ->addColumn('applicant_resume', function ($applicant) {
-                    $path = $applicant->applicant_cv; // e.g. uploads/cv/file.pdf
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (
-                            file_exists($fullPath) &&
-                            (!$applicant->is_blocked || Gate::allows('applicant-show-blocked-data'))
-                        ) {
-
-                            $url = asset($path); // direct public URL
-
-                            return '<a href="' . $url . '" title="Download CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-success fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
-                ->addColumn('crm_resume', function ($applicant) {
-                    $path = $applicant->updated_cv;
-
-                    if ($path && str_starts_with($path, 'uploads/')) {
-
-                        $fullPath = public_path($path);
-
-                        if (
-                            file_exists($fullPath) &&
-                            (!$applicant->is_blocked || Gate::allows('applicant-show-blocked-data'))
-                        ) {
-
-                            $url = asset($path);
-
-                            return '<a href="' . $url . '" title="Download Updated CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-primary fs-28"></iconify-icon>
-                                    </a>';
-                        }
-                    }
-
-                    return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
-                })
+                ->addColumn('applicant_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->applicant_cv, $applicant->is_blocked, 'original', 'success', 'Download CV'))
+                ->addColumn('crm_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->updated_cv, $applicant->is_blocked, 'updated', 'primary', 'Download Updated CV'))
                 ->addColumn('customStatus', function ($applicant) {
                     $status = '';
                     if ($applicant->is_blocked == 1) {
@@ -1215,17 +1146,6 @@ class ApplicantController extends Controller
             Log::error('Failed to store notes: ' . $e->getMessage());
 
             return back()->with('error', 'Something went wrong while saving notes.');
-        }
-    }
-    public function downloadCv(int $id)
-    {
-        $applicant = Applicant::findOrFail($id);
-        $filePath = $applicant->cv_path;
-
-        if (Storage::exists($filePath)) {
-            return Storage::download($filePath);
-        } else {
-            return response()->json(['error' => 'File not found'], 404);
         }
     }
     public function edit(int $id)
@@ -1391,44 +1311,9 @@ class ApplicantController extends Controller
             $path = null;
 
             if ($request->hasFile('applicant_cv')) {
-
-                // 🧹 Delete old CV if exists (public path)
-                if (!empty($applicantData['applicant_cv'])) {
-                    $oldFile = public_path($applicantData['applicant_cv']);
-
-                    if (file_exists($oldFile)) {
-                        unlink($oldFile);
-                    }
-                }
-
-                // 📅 Dynamic directory: public/uploads/resume/YYYY/MM/DD
-                $year = now()->year;
-                $month = now()->format('m');
-                $day = now()->format('d');
-
-                $directory = "uploads/resume/{$year}/{$month}/{$day}";
-                $destinationPath = public_path($directory);
-
-                if (!File::exists($destinationPath)) {
-                    File::makeDirectory($destinationPath, 0755, true, true);
-                }
-
-                // 🧾 Original filename & extension
-                $filenameWithExt = $request->file('applicant_cv')->getClientOriginalName();
-                $filename = pathinfo($filenameWithExt, PATHINFO_FILENAME);
-                $extension = $request->file('applicant_cv')->getClientOriginalExtension();
-
-                // 🔤 Clean filename
-                $filename = preg_replace('/[\s-]+/', '_', trim($filename));
-
-                // 🕒 Unique filename
-                $fileNameToStore = $filename . '_' . time() . '.' . $extension;
-
-                // 🚚 Move file to public directory
-                $request->file('applicant_cv')->move($destinationPath, $fileNameToStore);
-
-                // ✅ Save relative path in DB
-                $path = $directory . '/' . $fileNameToStore;
+                // The old file is removed after the update has been saved (below), so a failed
+                // update never loses the CV it would have replaced.
+                $path = CvStorage::store($request->file('applicant_cv'));
                 $applicantData['applicant_cv'] = $path;
             }
 
@@ -1504,6 +1389,8 @@ class ApplicantController extends Controller
                         $applicantData['lat'] = $result['lat'];
                         $applicantData['lng'] = $result['lng'];
                     } catch (Exception $e) {
+                        DB::rollBack();
+                        CvStorage::delete($path);                 // the upload that was not used
                         return response()->json([
                             'success' => false,
                             'message' => 'Unable to locate address: ' . $e->getMessage()
@@ -1514,6 +1401,8 @@ class ApplicantController extends Controller
                     $applicantData['lng'] = $postcode_query->lng;
                 }
             }
+
+            $oldCv = $applicant->applicant_cv;
 
             // Update the applicant with the validated and formatted data
             $applicant->update($applicantData);
@@ -1538,6 +1427,10 @@ class ApplicantController extends Controller
 
             DB::commit();
 
+            if ($path !== null && $oldCv && $oldCv !== $path) {
+                CvStorage::delete($oldCv);                        // replaced, and the update is saved
+            }
+
             // Redirect to the applicants page with a success message
             return response()->json([
                 'success' => true,
@@ -1546,6 +1439,7 @@ class ApplicantController extends Controller
             ]);
         } catch (Exception $e) {
             DB::rollBack();
+            CvStorage::delete($path ?? null);
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage()
@@ -1598,7 +1492,7 @@ class ApplicantController extends Controller
             'success' => true,
             'message' => 'File uploaded successfully',
             'file_path' => $filePath,
-            'file_url' => asset($filePath),
+            'file_url' => CvStorage::url($applicant->id, 'original'),
         ]);
     }
 
@@ -1615,31 +1509,26 @@ class ApplicantController extends Controller
             'success' => true,
             'message' => 'File uploaded successfully',
             'file_path' => $relativePath,
-            'file_url' => asset($relativePath),
+            'file_url' => CvStorage::url($applicant->id, 'updated'),
         ]);
     }
 
     /**
-     * Save an uploaded CV under public/uploads/resume/YYYY/MM/DD, point $column at it, and
-     * only then remove the file it replaces (before, a failed upload lost the old CV).
-     * The random part keeps the name from being guessed from the upload time.
+     * Save an uploaded CV privately (CvStorage), point $column at it, and only then remove
+     * the file it replaces (before, a failed upload lost the old CV).
      */
     private function storeCvFile(Applicant $applicant, string $column, \Illuminate\Http\UploadedFile $file): string
     {
-        $directory = 'uploads/resume/' . now()->format('Y/m/d');
-        File::ensureDirectoryExists(public_path($directory), 0755);
-
-        $name = preg_replace('/[^A-Za-z0-9_]+/', '_', pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME));
-        $name = trim(substr((string) $name, 0, 80), '_') ?: 'cv';
-        $fileName = $name . '_' . time() . '_' . Str::lower(Str::random(8)) . '.'
-            . strtolower($file->getClientOriginalExtension());
-        $file->move(public_path($directory), $fileName);
-
-        $path = $directory . '/' . $fileName;
+        $path = CvStorage::store($file);
         $old = (string) $applicant->{$column};
-        $applicant->update([$column => $path]);
-        if ($old !== '' && $old !== $path && str_starts_with($old, 'uploads/resume/') && is_file(public_path($old))) {
-            @unlink(public_path($old));
+        try {
+            $applicant->update([$column => $path]);
+        } catch (\Throwable $e) {
+            CvStorage::delete($path);
+            throw $e;
+        }
+        if ($old !== '' && $old !== $path) {
+            CvStorage::delete($old);
         }
 
         return $path;

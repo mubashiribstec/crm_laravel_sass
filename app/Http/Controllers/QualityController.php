@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Support\CvStorage;
 
 use Horsefly\Sale;
 use Horsefly\Unit;
@@ -404,8 +405,8 @@ class QualityController extends Controller
                 $this->hydrateLazyQualityDecisionData($row, $statusFilter);
                 return Carbon::parse($row->notes_created_at)->format('d M Y, h:iA');
             })
-            ->editColumn('applicant_resume', fn($row) => $this->renderResumeLink($row->applicant_cv, $row->is_blocked, 'success'))
-            ->addColumn('crm_resume', fn($row) => $this->renderResumeLink($row->updated_cv, $row->is_blocked, 'primary'))
+            ->editColumn('applicant_resume', fn($row) => CvStorage::linkCell($row->id, $row->applicant_cv, $row->is_blocked, 'original', 'success'))
+            ->addColumn('crm_resume', fn($row) => CvStorage::linkCell($row->id, $row->updated_cv, $row->is_blocked, 'updated', 'primary'))
             ->addColumn('customStatus', fn($row) => $this->renderCustomStatus($row))
             ->addColumn('action', fn($row) => $this->renderActionMenu($row, $statusFilter))
             ->rawColumns(['notes_detail', 'applicant_name', 'notes_created_at', 'job_details', 'sale_postcode', 'applicantEmail', 'applicant_postcode', 'crm_resume', 'applicantPhone', 'job_title', 'applicant_resume', 'customStatus', 'job_category', 'sale_job_source', 'action'])
@@ -888,28 +889,6 @@ class QualityController extends Controller
         }
 
         return $phones;
-    }
-
-    private function renderResumeLink($cvPath, $isBlocked, $color): string
-    {
-
-        if ($cvPath && str_starts_with($cvPath, 'uploads/')) {
-
-            $fullPath = public_path($cvPath);
-
-            if (!$isBlocked && file_exists($fullPath)) {
-
-                $url = asset($cvPath); // direct public URL
-
-                return '<a href="' . $url . '" title="Download CV" target="_blank" class="text-decoration-none">
-                                        <iconify-icon icon="solar:download-square-bold" class="text-' . $color . ' fs-28"></iconify-icon>
-                                    </a>';
-            }
-        }
-
-        return '<button disabled title="CV Not Available" class="border-0 bg-transparent p-0">
-                                <iconify-icon icon="solar:download-square-bold" class="text-grey fs-28"></iconify-icon>
-                            </button>';
     }
 
     private function renderCustomStatus($applicant): string
