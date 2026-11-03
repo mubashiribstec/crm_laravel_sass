@@ -6,15 +6,16 @@ on:
   pull_request:
 
 jobs:
-  # Production runs on MariaDB; the Docker setup runs MySQL 8. Both are tested: a
-  # migration MySQL 8 refuses (a default on a TEXT column) once slipped through MariaDB-only CI.
+  # Production and the Docker setup run MariaDB (11.8, as in docker-compose.yml). MySQL 8 is
+  # tested too, so the code stays portable: a migration MySQL 8 refuses (a default on a TEXT
+  # column) once slipped through MariaDB-only CI.
   phpunit:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         db:
-          - { name: mariadb, image: "mariadb:11", health: "healthcheck.sh --connect --innodb_initialized" }
+          - { name: mariadb, image: "mariadb:11.8", health: "healthcheck.sh --connect --innodb_initialized" }
           - { name: mysql8, image: "mysql:8.0", health: "mysqladmin ping -h 127.0.0.1" }
     name: phpunit (${{ matrix.db.name }})
     services:

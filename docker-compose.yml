@@ -8,13 +8,16 @@ services:
     restart: unless-stopped
     working_dir: /var/www/crm
     environment:
-      # The DB lives in the mysql container on the laravel network, not on
+      # The DB lives in the mariadb container on the laravel network, not on
       # 127.0.0.1 (inside this container 127.0.0.1 is itself). Overrides .env.
       # Everything else (APP_URL, DB_PASSWORD, XPLOGENT_*) comes from .env, which is
       # mounted with the code. Never put passwords in this file: it is in git.
-      DB_HOST: mysql
+      DB_HOST: mariadb
     volumes:
       - ./:/var/www/crm
+    depends_on:
+      mariadb:
+        condition: service_healthy
     # PHP-FPM (9000) is reached by nginx over the "laravel" network only. Publishing it let
     # anyone on the LAN talk FastCGI to PHP directly, which can run arbitrary code.
     networks:
@@ -39,24 +42,34 @@ services:
     networks:
       - laravel
 
-  mysql:
-    image: mysql:8.0
-    container_name: laravel-mysql
+  # MariaDB, as in production (11.8 is the current long-term-support release; CI tests on 11.x).
+  mariadb:
+    image: mariadb:11.8
+    container_name: laravel-mariadb
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
-      MYSQL_DATABASE: crm_kbp           # ✅ Optional: auto-create this DB
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+      MARIADB_DATABASE: ${DB_DATABASE:-crm_kbp}   # created on the first start
     ports:
-      - "127.0.0.1:3306:3306"   # this machine only; never publish MySQL to the network
+      - "127.0.0.1:3306:3306"   # this machine only; never publish the database to the network
     volumes:
-      - mysql_data:/var/lib/mysql
-    # On the app's network, so the app reaches it as DB_HOST=mysql (port 3306 is no longer
-    # published to the LAN, so the app can't go through the host's address).
+      # Its own volume: MariaDB can't open the old MySQL 8 data files (mysql_data).
+      # Moving existing data across: SETUP.md, "Moving from the old MySQL container".
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # On the app's network, so the app reaches it as DB_HOST=mariadb (port 3306 is not
+    # published to the LAN). The alias keeps an older .env with DB_HOST=mysql working.
     networks:
-      - laravel
+      laravel:
+        aliases:
+          - mysql
 
   # Database admin UI, off by default: `docker compose --profile tools up -d phpmyadmin`.
-  # It logs in to MySQL with the root password, so it listens on this machine only.
+  # It logs in to MariaDB with the root password, so it listens on this machine only.
   # From your PC: ssh -L 8080:127.0.0.1:8080 <user>@<this server>, then open
   # http://127.0.0.1:8080. Stop it when done: `docker compose stop phpmyadmin`.
   phpmyadmin:
@@ -65,20 +78,20 @@ services:
     container_name: laravel-phpmyadmin
     restart: unless-stopped
     environment:
-      # Talks to the mysql container by name over the laravel network.
-      PMA_HOST: mysql
+      # Talks to the mariadb container by name over the laravel network.
+      PMA_HOST: mariadb
       PMA_PORT: 3306
       # Lets phpMyAdmin import larger SQL files.
       UPLOAD_LIMIT: 300M
     ports:
       - "127.0.0.1:8080:80"     # never publish a DB admin tool to the network
     depends_on:
-      - mysql
+      - mariadb
     networks:
       - laravel
 
 volumes:
-  mysql_data:
+  mariadb_data:
 
 networks:
   laravel:
