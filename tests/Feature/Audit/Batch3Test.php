@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Audit;
 
+use App\Support\ApplicantAgeWindows;
+use Horsefly\Applicant;
 use Horsefly\CrmNote;
 use Horsefly\CVNote;
 use Horsefly\JobSource;
@@ -149,5 +151,48 @@ class Batch3Test extends XplogentTestCase
         $this->actingAs($admin)->post('/changeStatus', ['applicant_id' => $a->id, 'status' => 0, 'details' => 'Left'])
             ->assertRedirect();
         $this->assertSame(0, (int) $a->fresh()->status);
+    }
+
+    // ── L-01: the radius screen's title filter ───────────────────────────────
+    public function test_the_radius_list_honours_the_ticked_titles(): void
+    {
+        $senior = JobTitle::factory()->create(['name' => 'senior carer', 'job_category_id' => $this->category->id]);
+        $this->title->update(['related_titles' => json_encode(['senior carer'])]);
+        $sale = $this->sale();
+        $carer = $this->applicant();
+        $seniorCarer = $this->applicant(['job_title_id' => $senior->id]);
+        $user = $this->staff('Jane Recruiter', 'sale-view');
+        $ids = fn (array $extra) => collect($this->actingAs($user)->getJson('/getApplicantsBySaleRadius?' . http_build_query(
+            ['sale_id' => $sale->id, 'radius' => 15, 'draw' => 1] + $extra), ['X-Requested-With' => 'XMLHttpRequest'])
+            ->assertOk()->json('data'))->pluck('id')->map(fn ($id) => (int) $id)->sort()->values()->all();
+
+        $this->assertSame([$carer->id, $seniorCarer->id], $ids([]));                       // nothing ticked: both
+        $this->assertSame([$seniorCarer->id], $ids(['title_filter' => [$senior->id]]));   // ticked: only that title
+    }
+
+    // ── L-03: dashboard counts use the Resources tabs' buckets ───────────────
+    public function test_the_dashboard_counts_use_the_same_buckets_as_the_resources_tabs(): void
+    {
+        foreach ([3 => 'last-7-days', 20 => 'last-21-days', 60 => 'last-3-months', 400 => 'older'] as $daysAgo => $_) {
+            $a = $this->applicant();
+            Applicant::whereKey($a->id)->update(['updated_at' => now()->subDays($daysAgo)]);
+        }
+        $counts = $this->actingAs($this->staff('Ada Admin', 'dashboard-top-stats'))->getJson('/dashboard/counts')
+            ->assertOk()->json();
+        // "3 months" used to count everything older than 36 days (the 60- and 400-day ones: 2).
+        $this->assertSame([1, 1, 1], [$counts['last7DaysCount'], $counts['last21DaysCount'], $counts['last3MonthsCount']]);
+
+        foreach (['last-7-days' => 1, 'last-21-days' => 1, 'last-3-months' => 1, 'other' => 0] as $key => $n) {
+            $this->assertSame($n, ApplicantAgeWindows::apply(Applicant::query(), 'updated_at', $key)->count(), $key);
+        }
+        // The Resources tab (same helper) answers for every bucket and returns the same applicant.
+        $resources = $this->staff('Rita Resourcer', 'resource-category-index');
+        foreach (['last-7-days', 'last-21-days', 'last-3-months', 'last-6-months', 'last-9-months', 'other'] as $key) {
+            $r = $this->actingAs($resources)->getJson('/getResourcesCategoryWised?' . http_build_query(
+                ['draw' => 1, 'date_range_filter' => $key]), ['X-Requested-With' => 'XMLHttpRequest'])->assertOk();
+            if ($key === 'last-21-days') {
+                $this->assertSame(1, (int) $r->json('recordsFiltered'));
+            }
+        }
     }
 }

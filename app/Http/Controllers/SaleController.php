@@ -4029,6 +4029,7 @@ class SaleController extends Controller
             'status_filter'    => $request->input('status_filter', ''),
             'cv_status_filter' => $request->input('cv_status_filter', ''),
             'source_filter'    => $request->input('source_filter', []),
+            'title_filter'     => $request->input('title_filter', []),   // the ticked titles (was dropped)
             'category_id'      => $sale->job_category_id,
         ];
 
