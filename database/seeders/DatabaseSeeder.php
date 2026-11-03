@@ -20,6 +20,12 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             JobCategoriesSeeder::class,
             JobSourcesSeeder::class,
+            // Tables the app reads that a fresh install left empty (S-04, S-05):
+            SettingsTableSeeder::class,
+            SmtpSettingsTableSeeder::class,
+            AllowedIpsSeeder::class,
+            RegionSeeder::class,
+            EmailTemplateSeeder::class,
             // FactorySeeder::class,
         ]);
     }

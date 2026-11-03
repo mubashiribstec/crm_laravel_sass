@@ -72,16 +72,17 @@ class SettingsTableSeeder extends Seeder
         ];
 
         foreach ($settings as $setting) {
-            DB::table('settings')->updateOrInsert(
-                ['key' => $setting['key']], // prevent duplicates
-                [
+            // Only missing keys: a re-seed must never wipe a real API key or URL.
+            if (!DB::table('settings')->where('key', $setting['key'])->exists()) {
+                DB::table('settings')->insert([
+                    'key' => $setting['key'],
                     'value' => $setting['value'],
                     'type'  => $setting['type'],
                     'group' => $setting['group'],
                     'updated_at' => now(),
                     'created_at' => now(),
-                ]
-            );
+                ]);
+            }
         }
     }
 }

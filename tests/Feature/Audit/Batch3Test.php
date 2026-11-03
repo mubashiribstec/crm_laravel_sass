@@ -237,4 +237,25 @@ class Batch3Test extends XplogentTestCase
             }
         }
     }
+
+    // ── S-03 – S-05: seeders ─────────────────────────────────────────────────
+    public function test_the_full_seeder_runs_twice_without_duplicates_or_overwriting_real_values(): void
+    {
+        \Illuminate\Support\Facades\Artisan::call('db:seed', ['--force' => true]);
+        DB::table('settings')->where('key', 'google_map_api_key')->update(['value' => 'real-key']);
+        $counts = fn () => collect(['job_categories', 'job_sources', 'allowed_ips', 'smtp_settings', 'regions',
+            'email_templates', 'settings', 'ip_addresses'])->mapWithKeys(fn ($t) => [$t => DB::table($t)->count()])->all();
+        $first = $counts();
+        \Illuminate\Support\Facades\Artisan::call('db:seed', ['--force' => true]);
+
+        $this->assertSame($first, $counts());
+        $this->assertSame(['job_sources' => 7, 'allowed_ips' => 2, 'smtp_settings' => 1, 'regions' => 12],
+            array_intersect_key($first, array_flip(['job_sources', 'allowed_ips', 'smtp_settings', 'regions'])));
+        $this->assertSame(5, DB::table('job_categories')->whereIn('name', ['Nurse', 'Non Nurse', 'Specialist', 'Chef', 'Nursery'])->count());
+        $this->assertSame('real-key', DB::table('settings')->where('key', 'google_map_api_key')->value('value'));
+        $this->assertTrue(DB::table('job_categories')->where('name', 'Specialist')->exists());
+        $this->assertFalse(DB::table('job_categories')->where('name', 'Speicialist')->exists());
+        $this->assertSame(0, (int) DB::table('email_templates')->where('slug', 'send_job_vacancy_details')->value('is_active'));
+        $this->assertNotNull(DB::table('regions')->where('name', 'Greater London')->value('latitude'));
+    }
 }

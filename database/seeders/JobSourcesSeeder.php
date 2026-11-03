@@ -46,14 +46,16 @@ class JobSourcesSeeder extends Seeder
             ],
         ];
 
-        foreach ($sources as $source) {
-            DB::table('job_sources')->insert([
-                'name' => $source['name'],
-                'description' => $source['description'],
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+        foreach ($sources as $source) {               // insert only what is missing: safe to run twice
+            if (!DB::table('job_sources')->where('name', $source['name'])->exists()) {
+                DB::table('job_sources')->insert([
+                    'name' => $source['name'],
+                    'description' => $source['description'],
+                    'is_active' => true,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
         }
     }
 }
