@@ -9,6 +9,11 @@ use Carbon\Carbon;
 
 class UserObserver
 {
+    /** Columns whose values never go into an audit row (2026_11_04_200500 cleans older rows). */
+    public const SECRET_FIELDS = ['password', 'remember_token', 'sip_password'];
+
+    public const CHANGED = '(changed)';
+
     /**
      * Handle the User "created" event.
      */
@@ -37,15 +42,24 @@ class UserObserver
         }
 
         $columns = $user->getDirty();
-        if (empty($columns)) {
+        // Signing in with "remember me" or signing out only cycles remember_token: not an edit.
+        if (array_diff(array_keys($columns), ['remember_token', 'updated_at']) === []) {
             return; // No real changes
         }
 
-        $user['changes_made'] = $columns;
+        // Never copy a secret into the audit log (activity logs show these values): say that it
+        // changed, not what to. (audit N-11)
+        unset($columns['remember_token']);
+        foreach (self::SECRET_FIELDS as $field) {
+            if (array_key_exists($field, $columns)) {
+                $columns[$field] = self::CHANGED;
+            }
+        }
 
         $user->audits()->create([
-            "user_id" => Auth::id(),
-            "data" => $user->toJson(),
+            // A console or queue change has no signed-in user; audits.user_id is required.
+            "user_id" => Auth::id() ?? $user->id,
+            "data" => json_encode(array_merge($user->toArray(), ['changes_made' => $columns])),
             "message" => "User '{$user->name}' has been updated successfully at {$user->updated_at}",
         ]);
     }
