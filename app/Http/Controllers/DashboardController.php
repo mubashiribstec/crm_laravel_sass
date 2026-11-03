@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\ApplicantAgeWindows;
 use Illuminate\Http\Request;
 
 use Horsefly\User;
@@ -70,14 +71,7 @@ class DashboardController extends Controller
     }
     public function getCounts()
     {
-        $now = Carbon::now();
 
-        // Static date calculations
-        $last7DaysStart   = $now->copy()->subDays(16)->startOfDay();
-        $last7DaysEnd     = $now->copy()->endOfDay();
-        $days21Start      = $now->copy()->subDays(37)->startOfDay();
-        $days21End        = $now->copy()->subDays(17)->endOfDay();
-        $cutoffDate       = $now->copy()->subDays(36)->endOfDay();
 
         // Preload counts that are quick
         $applicantQuery = Applicant::where('status', 1)->whereNull('deleted_at');
@@ -147,17 +141,11 @@ class DashboardController extends Controller
             ->whereNotIn('id', $linkedApplicantIds);
 
         // Use clones to avoid re-query building overhead
-        $last7DaysCount = (clone $unlinkedApplicants)
-            ->whereBetween('updated_at', [$last7DaysStart, $last7DaysEnd])
-            ->count();
-
-        $last21DaysCount = (clone $unlinkedApplicants)
-            ->whereBetween('updated_at', [$days21Start, $days21End])
-            ->count();
-
-        $last3MonthsCount = (clone $unlinkedApplicants)
-            ->where('updated_at', '<=', $cutoffDate)
-            ->count();
+        // The same buckets as the Resources tabs these cards are named after (they were a day
+        // off for 21 days, and "3 months" counted everything older than 36 days).
+        $last7DaysCount = ApplicantAgeWindows::apply(clone $unlinkedApplicants, 'updated_at', 'last-7-days')->count();
+        $last21DaysCount = ApplicantAgeWindows::apply(clone $unlinkedApplicants, 'updated_at', 'last-21-days')->count();
+        $last3MonthsCount = ApplicantAgeWindows::apply(clone $unlinkedApplicants, 'updated_at', 'last-3-months')->count();
 
         return response()->json([
             'applicantsCount'  => $applicantsCount,

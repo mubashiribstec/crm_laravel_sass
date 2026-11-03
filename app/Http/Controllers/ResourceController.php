@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\ApplicantAgeWindows;
 use App\Services\Xplogent\SaleInterestService;
 use Illuminate\Http\Request;
 
@@ -3740,44 +3741,8 @@ class ResourceController extends Controller
             });
         }
 
-        $now = Carbon::today();
-        switch ($dateRangeFilter) {
-            case 'last-21-days':
-                $endDate = $now->copy()->subDays(16);
-                $startDate = $endDate->copy()->subDays(21)->startOfDay();
-                $model->whereBetween('applicants.updated_at', [$startDate, $endDate->endOfDay()]);
-                break;
-
-            case 'last-3-months':
-                $endDate = $now->copy()->subDays(37);
-                $startDate = $endDate->copy()->subMonths(3)->startOfDay();
-                $model->whereBetween('applicants.updated_at', [$startDate, $endDate->endOfDay()]);
-                break;
-
-            case 'last-6-months':
-                $endDate = $now->copy()->subMonths(3)->subDays(37);
-                $startDate = $endDate->copy()->subMonths(6)->startOfDay();
-                $model->whereBetween('applicants.updated_at', [$startDate, $endDate->endOfDay()]);
-                break;
-
-            case 'last-9-months':
-                $endDate = $now->copy()->subMonths(9)->subDays(37);
-                $startDate = $endDate->copy()->subMonths(9)->startOfDay();
-                $model->whereBetween('applicants.updated_at', [$startDate, $endDate->endOfDay()]);
-                break;
-
-            case 'other':
-                $cutoffDate = $now->copy()->subMonths(19)->subDays(7);
-                $model->where('applicants.updated_at', '<', $cutoffDate);
-                break;
-
-            case 'last-7-days':
-            default:
-                $startDate = $now->copy()->subDays(16)->startOfDay();
-                $endDate = $now->endOfDay();
-                $model->whereBetween('applicants.updated_at', [$startDate, $endDate]);
-                break;
-        }
+        // The age buckets are shared with the dashboard's counts (App\Support\ApplicantAgeWindows).
+        ApplicantAgeWindows::apply($model, 'applicants.updated_at', $dateRangeFilter);
 
         // Sorting is applied by DataTables (see orderColumn mappings below). When the
         // request has no sortable column, default to the latest note first.
