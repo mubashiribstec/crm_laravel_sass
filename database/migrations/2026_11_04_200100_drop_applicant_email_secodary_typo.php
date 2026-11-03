@@ -32,7 +32,8 @@ return new class extends Migration
         DB::table('applicants')
             ->where(fn ($q) => $filled($q, 'applicant_email_secodary'))
             ->where(fn ($q) => $q->whereNull('applicant_email_secondary')->orWhere('applicant_email_secondary', ''))
-            ->update(['applicant_email_secondary' => DB::raw('applicant_email_secodary')]);
+            // updated_at is kept: it auto-updates on any write, and the Resources tabs are based on it.
+            ->update(['applicant_email_secondary' => DB::raw('applicant_email_secodary'), 'updated_at' => DB::raw('updated_at')]);
 
         Schema::table('applicants', fn (Blueprint $t) => $t->dropColumn('applicant_email_secodary'));
     }

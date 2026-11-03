@@ -27,7 +27,10 @@ return new class extends Migration
             if (!Schema::hasColumn($table, $column)) {
                 continue;
             }
-            DB::table($table)->whereIn($column, ['Null', 'NULL'])->update([$column => null]);
+            // updated_at is kept as it was: several tables auto-update it on any write, and
+            // reports and the Resources tabs read it.
+            $keep = Schema::hasColumn($table, 'updated_at') ? ['updated_at' => DB::raw('updated_at')] : [];
+            DB::table($table)->whereIn($column, ['Null', 'NULL'])->update([$column => null] + $keep);
             Schema::table($table, fn (Blueprint $t) => $t->string($column, $length)->nullable()->default(null)->change());
         }
     }
