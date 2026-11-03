@@ -103,7 +103,9 @@ class CandidateQueueService
             ->where('applicants.is_in_nurse_home', 0)
             ->whereNotNull('applicants.lat')
             ->whereNotNull('applicants.lng')
-            ->whereIn('applicants.job_title_id', $this->titleIds($sale)) // sale's title + related titles
+            ->whereIn('applicants.job_title_id', $this->titleIds($sale)); // sale's title + related titles
+        // Box first (index-friendly), then the exact distance (P-01).
+        $this->applyRadiusBoundingBox($model, $lat, $lng, $radiusKm)
             ->whereRaw(self::DISTANCE_SQL . ' <= ?', [$lat, $lng, $lat, $radiusKm]);
 
         $this->applyRadiusApplicantFilters($model, (int) $sale->id,

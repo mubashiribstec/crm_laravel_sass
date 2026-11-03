@@ -258,4 +258,20 @@ class Batch3Test extends XplogentTestCase
         $this->assertSame(0, (int) DB::table('email_templates')->where('slug', 'send_job_vacancy_details')->value('is_active'));
         $this->assertNotNull(DB::table('regions')->where('name', 'Greater London')->value('latitude'));
     }
+
+    // ── P-01: bounding box before the haversine ──────────────────────────────
+    public function test_the_radius_box_keeps_everyone_inside_the_radius_and_nobody_outside(): void
+    {
+        $sale = $this->sale(['lat' => 53.82, 'lng' => -1.58]);
+        $kmPerDegLng = 111.32 * cos(deg2rad(53.82));
+        $in = [$this->applicant(['lat' => 53.82 + 14.8 / 111.32, 'lng' => -1.58]),        // 14.8 km north
+               $this->applicant(['lat' => 53.82, 'lng' => -1.58 + 14.8 / $kmPerDegLng])];  // 14.8 km east
+        $this->applicant(['lat' => 53.82 + 15.3 / 111.32, 'lng' => -1.58]);              // 15.3 km north
+        $this->applicant(['lat' => 53.82, 'lng' => -1.58 - 15.3 / $kmPerDegLng]);        // 15.3 km west
+        $ids = array_column($this->signed('/api/xplogent/campaigns/queue', ['sale_id' => $sale->id, 'radius_km' => 15])
+            ->assertOk()->json('candidates'), 'applicant_id');
+        sort($ids);
+        $this->assertSame(collect($in)->pluck('id')->sort()->values()->all(), $ids);
+        $this->assertTrue(Schema::hasIndex('applicants', 'idx_applicants_radius'));
+    }
 }
