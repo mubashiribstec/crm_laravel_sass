@@ -62,7 +62,8 @@ class SecurityBatch1Test extends XplogentTestCase
         $this->actingAs($this->staff('No Role'))->postJson('/crmChangePaidStatus', [])->assertForbidden();
         $this->actingAs($this->staff('Viewer', 'crm-index'))->postJson('/crmChangePaidStatus', [])->assertForbidden();
         $this->assertNotSame(403, $this->actingAs($this->staff('Viewer', 'crm-index'))
-            ->postJson('/crmSendRequest', [])->status());                   // ordinary CRM actions: crm-index is enough
+            ->postJson('/crmRequestNoResponse', [])->status());             // a button with no permission of its own
+        // (each other action needs its button's permission: Batch3Test covers them)
         $code = $this->actingAs($this->staff('Payroll', 'crm-index', 'crm-paid-toggle-status'))
             ->postJson('/crmChangePaidStatus', [])->status();
         $this->assertNotSame(403, $code);                                    // allowed through (then fails validation)

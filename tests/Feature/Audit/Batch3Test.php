@@ -29,7 +29,7 @@ class Batch3Test extends XplogentTestCase
         $a = $this->applicant();
         $cv = CVNote::create(['applicant_id' => $a->id, 'sale_id' => $sale->id, 'user_id' => $this->ai->id,
             'status' => 0, 'details' => 'x']);
-        $this->actingAs($this->staff('Jane Recruiter', 'crm-index'))->postJson('/crmRevertRequestRejectToRequest',
+        $this->actingAs($this->staff('Jane Recruiter', 'crm-index', 'crm-revert'))->postJson('/crmRevertRequestRejectToRequest',
             ['applicant_id' => $a->id, 'sale_id' => $sale->id, 'details' => 'revert please'])
             ->assertStatus(409)->assertJson(['success' => false])
             ->assertJsonPath('message', "There is no 'CV sent' note to revert to for this applicant and sale.");
@@ -357,5 +357,44 @@ class Batch3Test extends XplogentTestCase
             . http_build_query(['draw' => 1, 'tab_filter' => 'sent cvs']), ['X-Requested-With' => 'XMLHttpRequest'])
             ->assertOk()->json('data.0.action'), '<li>');
         $this->assertGreaterThan($menu($viewer), $menu($doer));
+    }
+
+    // ── CRM per-action permissions (left over from batch 1) ──────────────────
+    public function test_each_crm_action_needs_the_permission_its_button_checks(): void
+    {
+        $viewer = $this->staff('Vic Viewer', 'crm-index');
+        foreach (['/crmRevertInQuality' => 'crm-revert-in-quality', '/crmRevertConfirmToRequest' => 'crm-revert',
+                     '/crmScheduleInterview' => 'crm-schedule-interview', '/crmSendRequest' => 'crm-send-request',
+                     '/updateCrmNotes' => 'crm-add-note', '/crmRevertRequestedCvToQuality' => 'crm-revert-request',
+                     '/crmConfirmInterviewToAttend' => 'crm-accept-confirmation', '/crmRebookToAttended' => 'crm-accept-rebook',
+                     '/crmAttendedToStartDate' => 'crm-accept-attended', '/crmStartDateToInvoice' => 'crm-accept-start-date',
+                     '/crmRequestConfirm' => 'crm-send-confirmation'] as $uri => $permission) {
+            $checks[$uri] = $this->staff('Has ' . $permission, 'crm-index', $permission);   // all users first
+        }
+        foreach ($checks as $uri => $user) {
+            $this->actingAs($viewer)->postJson($uri, [])->assertForbidden();
+            $this->assertNotSame(403, $this->actingAs($user)->postJson($uri, [])->status(), $uri);   // through (then validation)
+            $this->assertSame(1, \Illuminate\Support\Facades\DB::transactionLevel(), $uri . ' left a transaction open');
+        }
+        // The "no response" buttons check no permission, so crm-index is still enough for them.
+        $this->assertNotSame(403, $this->actingAs($viewer)->postJson('/crmRequestNoResponse', [])->status());
+
+        // And no CRM action is left on crm-index alone, apart from those three.
+        $open = ['index', 'getCrmApplicantsAjaxRequest', 'crmNotesHistoryIndex', 'getApplicantCrmNotesHistoryAjaxRequest',
+            'getApplicantCrmNotes', 'crmRequestNoResponse', 'crmRequestNoResponseToConfirmedRequest',
+            'crmRequestNoResponseToReject'];
+        foreach (app('router')->getRoutes() as $route) {
+            if (($route->getAction('controller') ?? '') === '' || !str_starts_with($route->getAction('controller'),
+                    \App\Http\Controllers\CrmController::class . '@')) {
+                continue;
+            }
+            $method = $route->getActionMethod();
+            $permissions = array_filter($route->controllerMiddleware(), fn ($m) => str_starts_with($m, 'permission:')
+                && $m !== 'permission:crm-index');
+            if (in_array($method, $open, true)) {
+                continue;
+            }
+            $this->assertNotEmpty($permissions, $method . ' needs more than crm-index');
+        }
     }
 }

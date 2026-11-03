@@ -84,7 +84,38 @@ class CrmController extends Controller
         $this->middleware('permission:crm-accept-invoice-sent')->only(['crmInvoiceSentToPaid', 'crmInvoiceSentToDispute']);
         $this->middleware('permission:crm-paid-toggle-status')->only(['crmChangePaidStatus', 'crmOpenToPaidApplicants']);
         $this->middleware('permission:crm-paid-revert')->only(['crmPaidRevertToInvoiceSent']);
+
+        // Every other action needs the permission its button on the CRM tabs already checks
+        // (getCrmApplicantsAjaxRequest), so nobody loses a button they can see. The "no
+        // response" actions have a button with no permission check, so crm-index is enough.
+        foreach (self::ACTION_PERMISSIONS as $permissions => $actions) {
+            $this->middleware('permission:' . $permissions)->only($actions);
+        }
     }
+
+    /** Permission(s) (any one) => the actions behind the buttons that check it. */
+    private const ACTION_PERMISSIONS = [
+        'crm-add-note' => ['updateCrmNotes', 'crmSendRejectedCv', 'updateCrmNoJobNotes', 'crmSendNoJobToRejectedCv',
+            'crmStartDateHoldSave'],
+        'crm-send-request' => ['crmSendRequest', 'crmSendNoJobRequest'],
+        'crm-schedule-interview' => ['crmScheduleInterview', 'crmRequestedInterviewEmailToApplicant'],
+        'crm-schedule-interview,crm-send-confirmation' => ['crmRequestConfirm', 'crmRequestReject', 'crmRequestSave'],
+        'crm-revert-request' => ['crmRevertRequestedCvToSentCv', 'crmRevertRequestedCvToQuality'],
+        'crm-revert' => ['crmRevertRejectedCvToSentCv', 'crmRevertRequestRejectToSentCv', 'crmRevertRequestRejectToRequest',
+            'crmRevertConfirmToRequest', 'crmRevertRebookToConfirmation', 'crmRevertAttendedToRebook',
+            'crmRevertDeclinedToAttended', 'crmNotAttendedToAttended', 'crmRevertStartDateToAttended',
+            'crmRevertStartDateHoldToStartDate', 'crmRevertInvoiceToStartDate', 'crmRevertDisputeToInvoice'],
+        'crm-revert-in-quality' => ['crmRevertInQuality', 'crmSentCvNoJobRevertInQuality', 'crmRevertRejectedCvToQuality',
+            'crmRequestRejectToQuality', 'crmRevertConfirmToQuality', 'crmRevertRebookToQuality',
+            'crmRevertAttendedToQuality', 'crmRevertDeclinedToQuality', 'crmNotAttendedToQuality',
+            'crmStartDateToQuality', 'crmStartDateHoldToQuality', 'crmInvoiceToQuality', 'crmInvoiceSentToQuality',
+            'crmDisputeToQuality'],
+        'crm-accept-confirmation' => ['crmConfirmInterviewToAttend', 'crmConfirmInterviewToNotAttend',
+            'crmConfirmInterviewToRebook', 'crmConfirmSave'],
+        'crm-accept-rebook' => ['crmRebookSave', 'crmRebookToAttended', 'crmRebookToNotAttended'],
+        'crm-accept-attended' => ['crmAttendedSave', 'crmAttendedToDecline', 'crmAttendedToStartDate'],
+        'crm-accept-start-date' => ['crmStartDateSave', 'crmStartDateToHold', 'crmStartDateToInvoice'],
+    ];
 
     use SendEmails, SendSMS, HidesPrivateContacts;
 
@@ -5858,7 +5889,7 @@ class CrmController extends Controller
                 'message' => 'CRM Interview Scheduled Successfully'
             ]);
         } catch (ValidationException $e) {
-            DB::rollBack();
+            // validate() runs before the transaction starts: nothing to roll back.
             return response()->json([
                 'success' => false,
                 'message' => 'Validation error',
@@ -5955,7 +5986,7 @@ class CrmController extends Controller
             DB::commit();
             return response()->json(['success' => true, 'message' => 'CRM Request Rejected Successfully']);
         } catch (ValidationException $e) {
-            DB::rollBack();
+            // validate() runs before the transaction starts: nothing to roll back.
             return response()->json([
                 'success' => false,
                 'message' => 'Validation error',
@@ -6104,7 +6135,7 @@ class CrmController extends Controller
             DB::commit();
             return response()->json(['success' => true, 'message' => 'CRM Request No Response Successfully']);
         } catch (ValidationException $e) {
-            DB::rollBack();
+            // validate() runs before the transaction starts: nothing to roll back.
             return response()->json([
                 'success' => false,
                 'message' => 'Validation error',
