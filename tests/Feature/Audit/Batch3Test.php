@@ -397,4 +397,34 @@ class Batch3Test extends XplogentTestCase
             $this->assertNotEmpty($permissions, $method . ' needs more than crm-index');
         }
     }
+
+    // ── N-08: the Open CVs "Send request" item ───────────────────────────────
+    public function test_every_crm_menu_item_calls_a_function_the_page_defines(): void
+    {
+        $controller = file_get_contents(app_path('Http/Controllers/CrmController.php'));
+        $controller = preg_replace('#^\s*//.*$#m', '', $controller);               // not commented-out code
+        preg_match_all('/onclick="((?:crm|updateCrm)\w*)\(/', $controller, $called);
+        preg_match_all('/function\s+(\w+)\s*\(/', file_get_contents(resource_path('views/crm/list.blade.php')), $defined);
+        $this->assertSame([], array_values(array_diff(array_unique($called[1]), $defined[1])));
+    }
+
+    public function test_open_cvs_send_request_opens_the_request_dialog_for_that_tab(): void
+    {
+        $sale = $this->sale();
+        $a = $this->applicant();
+        CVNote::create(['applicant_id' => $a->id, 'sale_id' => $sale->id, 'user_id' => $this->ai->id, 'status' => 1,
+            'details' => 'sent']);
+        DB::table('revert_stages')->insert(['applicant_id' => $a->id, 'sale_id' => $sale->id, 'user_id' => $this->ai->id,
+            'notes' => 'on hold', 'stage' => 'cv_hold']);
+        \Horsefly\History::create(['applicant_id' => $a->id, 'sale_id' => $sale->id, 'user_id' => $this->ai->id,
+            'stage' => 'quality', 'sub_stage' => 'quality_cvs_hold', 'status' => 1]);
+        $user = $this->staff('Dee Doer', 'crm-index', 'crm-send-request');
+
+        $html = collect($this->actingAs($user)->getJson('/getCrmApplicantsAjaxRequest?' . http_build_query(['draw' => 1,
+            'tab_filter' => 'open cvs']), ['X-Requested-With' => 'XMLHttpRequest'])->assertOk()->json('data'))
+            ->firstWhere('id', $a->id)['action'] ?? '';
+        $this->assertStringContainsString("crmSentCvToRequestModal(this, {$a->id}, {$sale->id}, 'open_cv')", $html);
+        $this->assertStringContainsString('id="crmSentCvToRequestModal' . $a->id . '-' . $sale->id . '"', $html);
+        $this->assertStringNotContainsString('crmSendRequestModal(', $html);
+    }
 }
