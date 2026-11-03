@@ -329,4 +329,33 @@ class Batch3Test extends XplogentTestCase
         $this->assertSame(100, $this->getJson('/api/sales/open?per_page=5000', $auth)->json('meta.per_page'));
         $this->assertContains('throttle:60,1', app('router')->getRoutes()->getByName('api.sales.open')->gatherMiddleware());
     }
+
+    // ── P-04: CRM tables resolve each permission once per request ────────────
+    public function test_every_crm_tab_renders_with_and_without_the_action_permissions(): void
+    {
+        $tabs = ['sent cvs', 'sent cvs (no job)', 'open cvs', 'rejected cvs', 'request', 'request (no job)',
+            'request (no response)', 'rejected by request', 'confirmation', 'rebook', 'attended to pre-start date',
+            'declined', 'not attended', 'start date', 'start date hold', 'invoice', 'invoice sent', 'dispute', 'paid'];
+        $sale = $this->sale();
+        $a = $this->applicant();
+        \Horsefly\QualityNotes::create(['applicant_id' => $a->id, 'sale_id' => $sale->id, 'user_id' => $this->ai->id,
+            'details' => 'ok', 'moved_tab_to' => 'cleared', 'status' => 1]);
+        CrmNote::create(['applicant_id' => $a->id, 'sale_id' => $sale->id, 'user_id' => $this->ai->id,
+            'details' => 'sent', 'moved_tab_to' => 'cv_sent', 'status' => 1]);
+        \Horsefly\History::create(['applicant_id' => $a->id, 'sale_id' => $sale->id, 'user_id' => $this->ai->id,
+            'stage' => 'quality', 'sub_stage' => 'quality_cleared', 'status' => 1]);
+        $viewer = $this->staff('Vic Viewer', 'crm-index');
+        $doer = $this->staff('Dee Doer', 'crm-index', 'crm-revert', 'crm-add-note', 'crm-send-request', 'crm-revert-in-quality');
+        foreach ([$viewer, $doer] as $user) {
+            foreach ($tabs as $tab) {
+                $this->actingAs($user)->getJson('/getCrmApplicantsAjaxRequest?' . http_build_query(['draw' => 1,
+                    'tab_filter' => $tab]), ['X-Requested-With' => 'XMLHttpRequest'])->assertOk();
+            }
+        }
+        // The buttons still follow the permissions: more actions for the doer than the viewer.
+        $menu = fn ($user) => substr_count((string) $this->actingAs($user)->getJson('/getCrmApplicantsAjaxRequest?'
+            . http_build_query(['draw' => 1, 'tab_filter' => 'sent cvs']), ['X-Requested-With' => 'XMLHttpRequest'])
+            ->assertOk()->json('data.0.action'), '<li>');
+        $this->assertGreaterThan($menu($viewer), $menu($doer));
+    }
 }

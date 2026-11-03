@@ -52,6 +52,22 @@ use Illuminate\Support\Facades\Gate;
 class CrmController extends Controller
 {
     /**
+     * Permission checks cached for this request only (P-04): the CRM tables checked the same few
+     * abilities for every row. They are Spatie permissions, which depend only on the user. Kept on
+     * the request, not the controller: the router reuses controller instances between requests.
+     */
+    private function can(string $ability): bool
+    {
+        $cache = request()->attributes->get('crm.abilities', []);
+        if (!array_key_exists($ability, $cache)) {
+            $cache[$ability] = Gate::allows($ability);
+            request()->attributes->set('crm.abilities', $cache);
+        }
+
+        return $cache[$ability];
+    }
+
+    /**
      * Every CRM screen and action needs CRM access (crm-index). Before, the controller had no
      * permission checks at all, so any logged-in account could move candidates through the
      * pipeline, including invoice -> paid. Money-path actions also need the permission their
@@ -2523,12 +2539,12 @@ class CrmController extends Controller
                 })
                 ->addColumn('applicantPhone', function ($applicant) {
 
-                    if ($applicant->is_blocked && !Gate::allows('applicant-show-blocked-data')) {
+                    if ($applicant->is_blocked && !$this->can('applicant-show-blocked-data')) {
                         return "<span class='badge bg-dark'>Blocked</span>";
                     }
 
                     $showBlockedData = $applicant->is_blocked
-                        && Gate::allows('applicant-show-blocked-data');
+                        && $this->can('applicant-show-blocked-data');
 
                     $class = $showBlockedData ? 'show_hidden_phone' : '';
 
@@ -2719,7 +2735,7 @@ class CrmController extends Controller
                     // Filter by status if it's not empty
                     switch ($tabFilter) {
                         case 'open cvs':
-                            if (Gate::allows('crm-add-note', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-add-note')) {
                                 $actionButtons = '
                                     <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
@@ -2734,7 +2750,7 @@ class CrmController extends Controller
                                         Add CRM Notes
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-send-request', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-send-request')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
@@ -2749,7 +2765,7 @@ class CrmController extends Controller
                                         Send Request
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -2777,7 +2793,7 @@ class CrmController extends Controller
                             break;
 
                         case 'sent cvs (no job)':
-                            if (Gate::allows('crm-add-note', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-add-note')) {
                                 $actionButtons .= '
                                         <li><a class="dropdown-item" 
                                             href="javascript:void(0);" 
@@ -2789,7 +2805,7 @@ class CrmController extends Controller
                                             Add CRM Notes
                                         </a></li>';
                             }
-                            if (Gate::allows('crm-send-request', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-send-request')) {
                                 $actionButtons .= '
                                         <li><a class="dropdown-item" 
                                             href="javascript:void(0);" 
@@ -2801,7 +2817,7 @@ class CrmController extends Controller
                                             Send Request
                                         </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                             href="javascript:void(0);" 
                                             data-bs-toggle="modal" 
@@ -2830,7 +2846,7 @@ class CrmController extends Controller
                             break;
 
                         case 'rejected cvs':
-                            if (Gate::allows('crm-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert')) {
                                 $actionButtons .= '
                                         <li><a class="dropdown-item" 
                                             href="javascript:void(0);" 
@@ -2842,7 +2858,7 @@ class CrmController extends Controller
                                             Revert In Sent CV
                                         </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
@@ -2899,7 +2915,7 @@ class CrmController extends Controller
                                 $actionButtons .= '<li><a href="javascript:void(0);" class="dropdown-item disabled text-danger">
                                                         <i class="ri-lock-line"></i> Already Scheduled</a></li>';
                             } else {
-                                if (Gate::allows('crm-schedule-interview', [$applicant, $tabFilter])) {
+                                if ($this->can('crm-schedule-interview')) {
                                     if ($sentEmail) {
                                         // If the email is successfully sent (status = '1'), skip the email modal
                                         $actionButtons .= '<li>
@@ -2927,7 +2943,7 @@ class CrmController extends Controller
                                     }
                                 }
                             }
-                            if (Gate::allows('crm-schedule-interview', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-schedule-interview')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -2947,7 +2963,7 @@ class CrmController extends Controller
                                     onclick="crmMoveRequestToNoResponseModal(' . (int)$applicant->id . ', ' . (int)$applicant->sale_id . ')">
                                     Mark No Response
                                 </a></li>';
-                            if (Gate::allows('crm-revert-request', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-request')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
@@ -2959,7 +2975,7 @@ class CrmController extends Controller
                                         Revert In Sent CV
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-request', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-request')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3016,7 +3032,7 @@ class CrmController extends Controller
                             if ($applicant->schedule_time && $applicant->schedule_date && $applicant->interview_status == 1) {
                                 $actionButtons .= '<li><a href="javascript:void(0);" class="dropdown-item disabled text-danger">Already Scheduled</a></li>';
                             } else {
-                                if (Gate::allows('crm-schedule-interview', [$applicant, $tabFilter])) {
+                                if ($this->can('crm-schedule-interview')) {
                                     if ($sentEmail) {
                                         // If the email is successfully sent (status = '1'), skip the email modal
                                         $actionButtons .= '<li>
@@ -3044,7 +3060,7 @@ class CrmController extends Controller
                                     }
                                 }
                             }
-                            if (Gate::allows('crm-send-confirmation', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-send-confirmation')) {
                                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" 
                                             data-bs-toggle="modal" 
                                             data-bs-target="#crmMoveToconfirmationModal' . (int)$applicant->id . '-' . (int)$applicant->sale_id . '"
@@ -3054,7 +3070,7 @@ class CrmController extends Controller
                                             Move to Confirmation
                                         </a></li>';
                             }
-                            if (Gate::allows('crm-revert-request', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-request')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3065,7 +3081,7 @@ class CrmController extends Controller
                                         Revert In Sent CV
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-request', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-request')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3112,7 +3128,7 @@ class CrmController extends Controller
                                     Mark Confirm / Reject CV
                                 </a></li>';
 
-                            if (Gate::allows('crm-revert-request', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-request')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3123,7 +3139,7 @@ class CrmController extends Controller
                                         Revert In Sent CV
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-request', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-request')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3150,7 +3166,7 @@ class CrmController extends Controller
                                         ';
                             break;
                         case 'rejected by request':
-                            if (Gate::allows('crm-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
@@ -3171,7 +3187,7 @@ class CrmController extends Controller
                                         Revert In Request
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '   <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3199,7 +3215,7 @@ class CrmController extends Controller
                                         ';
                             break;
                         case 'confirmation':
-                            if (Gate::allows('crm-accept-confirmation', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-accept-confirmation')) {
                                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
                                         data-bs-target="#crmConfirmationAcceptCVModal' . (int)$applicant->id . '-' . (int)$applicant->sale_id . '"
@@ -3209,7 +3225,7 @@ class CrmController extends Controller
                                         Accept CV
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3220,7 +3236,7 @@ class CrmController extends Controller
                                         Revert In Request
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3247,7 +3263,7 @@ class CrmController extends Controller
                                 ';
                             break;
                         case 'rebook':
-                            if (Gate::allows('crm-accept-rebook', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-accept-rebook')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3258,7 +3274,7 @@ class CrmController extends Controller
                                         Accept CV
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
@@ -3270,7 +3286,7 @@ class CrmController extends Controller
                                         Revert In Confirmation
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3296,7 +3312,7 @@ class CrmController extends Controller
                                         ';
                             break;
                         case 'attended to pre-start date':
-                            if (Gate::allows('crm-accept-attended', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-accept-attended')) {
                                 $actionButtons .= '
                                         <li><a class="dropdown-item" href="javascript:void(0);" 
                                             data-bs-toggle="modal" 
@@ -3307,7 +3323,7 @@ class CrmController extends Controller
                                             Accept CV
                                         </a></li>';
                             }
-                            if (Gate::allows('crm-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                             href="javascript:void(0);" 
                                             data-bs-toggle="modal" 
@@ -3318,7 +3334,7 @@ class CrmController extends Controller
                                             Revert In Rebook
                                         </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                             href="javascript:void(0);" 
                                             data-bs-toggle="modal" 
@@ -3345,7 +3361,7 @@ class CrmController extends Controller
                                         ';
                             break;
                         case 'declined':
-                            if (Gate::allows('crm-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
@@ -3357,7 +3373,7 @@ class CrmController extends Controller
                                         Revert In Attended
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                     href="javascript:void(0);" 
                                     data-bs-toggle="modal" 
@@ -3384,7 +3400,7 @@ class CrmController extends Controller
                             ';
                             break;
                         case 'not attended':
-                            if (Gate::allows('crm-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
@@ -3396,7 +3412,7 @@ class CrmController extends Controller
                                         Revert In Attended
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3423,7 +3439,7 @@ class CrmController extends Controller
                                         ';
                             break;
                         case 'start date':
-                            if (Gate::allows('crm-accept-start-date', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-accept-start-date')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3434,7 +3450,7 @@ class CrmController extends Controller
                                         Accept CV
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3445,7 +3461,7 @@ class CrmController extends Controller
                                         Revert In Attended
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3472,7 +3488,7 @@ class CrmController extends Controller
                             ';
                             break;
                         case 'start date hold':
-                            if (Gate::allows('crm-add-note', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-add-note')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3483,7 +3499,7 @@ class CrmController extends Controller
                                         Add Note
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3494,7 +3510,7 @@ class CrmController extends Controller
                                         Revert In Start Date
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3522,7 +3538,7 @@ class CrmController extends Controller
                             ';
                             break;
                         case 'invoice':
-                            if (Gate::allows('crm-accept-invoice', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-accept-invoice')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3533,7 +3549,7 @@ class CrmController extends Controller
                                         Accept CV
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3544,7 +3560,7 @@ class CrmController extends Controller
                                         Revert In Start Date
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3571,7 +3587,7 @@ class CrmController extends Controller
                             ';
                             break;
                         case 'invoice sent':
-                            if (Gate::allows('crm-accept-invoice-sent', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-accept-invoice-sent')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3582,7 +3598,7 @@ class CrmController extends Controller
                                         Accept CV
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3609,7 +3625,7 @@ class CrmController extends Controller
                             ';
                             break;
                         case 'dispute':
-                            if (Gate::allows('crm-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
@@ -3621,7 +3637,7 @@ class CrmController extends Controller
                                         Revert In Invoice
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
@@ -3650,7 +3666,7 @@ class CrmController extends Controller
                         case 'paid':
                             $paid_status_button = ($applicant->paid_status == 'close') ? 'Open' : 'Close';
 
-                            if (Gate::allows('crm-paid-toggle-status', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-paid-toggle-status')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
@@ -3662,7 +3678,7 @@ class CrmController extends Controller
                                         Mark As ' . $paid_status_button . '
                                     </a></li>';
                             }
-                            if (Gate::allows('crm-paid-revert', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-paid-revert')) {
                                 $actionButtons .= '
                                     <li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
@@ -3687,7 +3703,7 @@ class CrmController extends Controller
                             break;
                         default:
                         case 'sent cv':
-                            if (Gate::allows('crm-add-note', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-add-note')) {
                                 $actionButtons .= '
                                         <li><a class="dropdown-item" 
                                                 href="javascript:void(0);" 
@@ -3702,7 +3718,7 @@ class CrmController extends Controller
                                                 Add CRM Notes
                                             </a></li>';
                             }
-                            if (Gate::allows('crm-send-request', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-send-request')) {
                                 // $actionButtons .= '<li><a class="dropdown-item" 
                                 //     href="javascript:void(0);" 
                                 //     data-bs-toggle="modal" 
@@ -3731,7 +3747,7 @@ class CrmController extends Controller
                                         </a>
                                     </li>';
                             }
-                            if (Gate::allows('crm-revert-in-quality', [$applicant, $tabFilter])) {
+                            if ($this->can('crm-revert-in-quality')) {
                                 $actionButtons .= '<li><a class="dropdown-item" 
                                         href="javascript:void(0);" 
                                         data-bs-toggle="modal" 
