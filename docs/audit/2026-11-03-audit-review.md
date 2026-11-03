@@ -34,8 +34,9 @@ evidence is specific and I have no reason to doubt it, but I didn't re-run it.
 | N-04 | P1 | CVs are **public static files** with guessable names (`uploads/resume/YYYY/MM/DD/<original name>_<unix time>.ext`), downloadable without logging in. This breaks UK GDPR data minimisation | Store new CVs privately with random names behind a permissioned download route; move existing files with a command; nginx denies the old path |
 | N-05 | P1 | `.env.example` carries `APP_DEBUG=true`, `APP_ENV=local` and test-machine values (`APP_URL`, `XPLOGENT_BASE_URL`, `DB_HOST=127.0.0.1` against its own comment). Copied to production, an error page shows secrets | Safe defaults (`APP_DEBUG=false`, `production`), placeholders, comments for local use |
 | N-06 | P1 | CI tests only MariaDB, while the Docker setup runs MySQL 8.0. M-01 fails only on MySQL 8, which is why CI never caught it | Add a MySQL 8.0 job beside MariaDB |
-| N-07 | P1 | *(found in batch 3)* `composer audit` lists 63 advisories in the locked packages (Laravel 12.17, Guzzle, PhpSpreadsheet, league/commonmark, Symfony…). The critical ones don't apply as used here: no `token` auth guard is configured, and imports read Laravel's temporary upload path, not a file name the user chooses | `composer update` within the current version ranges (Laravel 12.17 → 12.70, ~100 packages), as its own change with a full regression pass. Not done in batch 3: too wide to slip in |
-| N-08 | P2 | *(found in batch 3)* The **Open CVs** tab's "Send request" item calls `crmSendRequestModal()`, which doesn't exist in `crm/list.blade.php`, so the button does nothing (the **Sent CV** tab's version works) | Point it at `crmSentCvToRequestModal`, after checking with the recruiters how it should behave |
+| N-07 | P1 | *(found in batch 3)* `composer audit` lists 63 advisories in the locked packages (Laravel 12.17, Guzzle, PhpSpreadsheet, league/commonmark, Symfony…). The critical ones don't apply as used here: no `token` auth guard is configured, and imports read Laravel's temporary upload path, not a file name the user chooses | **Fixed in `21a72d7`:** `composer update` within the current version ranges (94 packages, Laravel 12.17 → 12.70.2). `composer audit` now lists none |
+| N-08 | P2 | *(found in batch 3)* The **Open CVs** tab's "Send request" item calls `crmSendRequestModal()`, which doesn't exist in `crm/list.blade.php`, so the button does nothing (the **Sent CV** tab's version works) | **Fixed in `091e848`:** it opens the Sent CV tab's request dialog with `tab=open_cv`, which `crmSendRequest` already handles |
+| N-09 | P2 | *(found after batch 3)* The CSV imports ignore the file's `id` column for offices (`'id'` is commented out of `Office::$fillable`), so imported offices get new ids. A units or sales file imported afterwards that refers to the old office ids then points at the wrong office | Decide whether the importer must keep legacy ids (allow `id` for the importer only, e.g. `forceFill`), and check the other models the importer writes |
 
 Production runs on **MariaDB** (owner's answer). M-01 therefore doesn't break production, but it does
 break the Docker setup (MySQL 8). It gets fixed either way.
@@ -270,8 +271,26 @@ they stay on `crm-index`.
   above.
 - PHP 8.3 on the server.
 
+**Still open:** see "After batch 3" below.
+
+### After batch 3
+| Finding | Commit | What changed |
+|---|---|---|
+| N-07 | `21a72d7` | Patch and minor updates within the existing version ranges: 94 packages, Laravel 12.17 → 12.70.2, no major upgrade of any CRM package. `composer audit`: 63 advisories → none. |
+| N-08 | `091e848` | Open CVs' "Send request" opens the working request dialog. A test checks that every CRM menu item calls a function the page defines. |
+| (tests) | `fe4bdc1` | The fixture sale's office and unit are active; the factories picked the status at random. |
+| B-09 follow-up | `7da49e7` | DataTables 12.7 refuses column names that aren't plain identifiers. The radius table now applies only its allowlisted sort: DataTables' own sort from the request used to reach the `ORDER BY` too, and an unknown column gave a 500. The test runs with `APP_DEBUG=false`, as production does; with debug on, DataTables reports its errors as 200. |
+
+| Docker | `8cbbc04` | The Docker setup runs **MariaDB 11.8**, as production does (it was `mysql:8.0`). New `mariadb_data` volume, a health check the app waits for, and `mysql` kept as a network alias. `SETUP.md`'s Docker section is rewritten: it described another repo's setup. It covers moving the old MySQL data across with a dump. |
+
+Checked: the whole suite (87) on MariaDB and MySQL 8, after `migrate:fresh --seed` and a second
+seed, also without built front-end assets. Live: login, logout, dashboard, CRM tabs, CV download,
+an offices CSV import and the regional applicants export (Laravel Excel).
+The PHP 8.3 image builds completely (PHP 8.3.36, Node 22.23, `pdftotext`, Laravel 12.70.2). The
+compose stack was run end to end on MariaDB 11.8.9: migrate, seed, login page, CV folder
+blocked. A MySQL 8 dump loaded into it as `SETUP.md` describes.
+
 **Still open:**
-- N-07 (dependency updates, proposed as the next change);
-- N-08;
+- N-09;
 - X-17 (owner question 2);
 - the P2 backlog.
