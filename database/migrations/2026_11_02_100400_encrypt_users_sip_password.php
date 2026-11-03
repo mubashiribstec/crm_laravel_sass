@@ -4,6 +4,7 @@ use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -32,10 +33,25 @@ return new class extends Migration
                         continue;                     // already encrypted
                     } catch (DecryptException) {
                     }
+                    if ($this->looksEncrypted($row->sip_password)) {
+                        // Encrypted, but under another APP_KEY (e.g. a database copied from another
+                        // server): encrypting it again would make it unreadable everywhere.
+                        Log::warning("users.sip_password for user {$row->id} is encrypted with a different "
+                            . 'APP_KEY; left as is. Re-enter that SIP password, or restore the matching APP_KEY.');
+                        continue;
+                    }
                     DB::table('users')->where('id', $row->id)
                         ->update(['sip_password' => Crypt::encryptString($row->sip_password)]);
                 }
             });
+    }
+
+    /** Laravel's encrypted-payload shape: base64 of {"iv", "value", "mac"}. */
+    private function looksEncrypted(string $value): bool
+    {
+        $payload = json_decode((string) base64_decode($value, true), true);
+
+        return is_array($payload) && isset($payload['iv'], $payload['value'], $payload['mac']);
     }
 
     public function down(): void

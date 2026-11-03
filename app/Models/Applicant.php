@@ -90,7 +90,7 @@ class Applicant extends Model
         'is_in_crm_reject' => 'boolean',
         'is_in_crm_request_reject' => 'boolean',
         'is_crm_request_confirm' => 'boolean',
-        'is_crm_interview_attended' => 'boolean',
+        'is_crm_interview_attended' => 'integer',   // 0 = no, 1 = yes, 2 = pending (boolean read 2 as true)
         'is_in_crm_start_date' => 'boolean',
         'is_in_crm_invoice' => 'boolean',
         'is_in_crm_invoice_sent' => 'boolean',
