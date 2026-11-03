@@ -88,11 +88,13 @@ abstract class XplogentTestCase extends TestCase
     /** An open vacancy in Leeds (LS6) for "care assistant". */
     protected function sale(array $overrides = []): Sale
     {
-        $office = Office::factory()->create(['office_name' => 'Oak Care Group']);
+        // Active office and unit: the factories pick status 0/1 at random, and some lists (e.g. the
+        // CRM's Open CVs tab) only show active ones.
+        $office = Office::factory()->create(['office_name' => 'Oak Care Group', 'status' => 1]);
 
         return Sale::factory()->create(array_merge([
             'office_id' => $office->id,
-            'unit_id' => Unit::factory()->create(['office_id' => $office->id, 'unit_name' => 'Oak House'])->id,
+            'unit_id' => Unit::factory()->create(['office_id' => $office->id, 'unit_name' => 'Oak House', 'status' => 1])->id,
             'job_category_id' => $this->category->id,
             'job_title_id' => $this->title->id,
             'sale_postcode' => 'LS6 2AB',
