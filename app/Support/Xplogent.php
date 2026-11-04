@@ -55,11 +55,39 @@ class Xplogent
     }
 
     /**
-     * A UK number as E.164: 07… -> +447…, 01/02/03… -> +44…; numbers already in
-     * +44 / 0044 / 44 form are normalised. Anything else (or too short) -> null.
+     * A number Xplogent can dial, in the form the dial expects.
+     *
+     * UK numbers are normalised to E.164: 07… -> +447…, 01/02/03… -> +44…;
+     * numbers already in +44 / 0044 / 44 form are normalised the same way.
+     *
+     * Two more forms are passed through unchanged (they are already dialable):
+     * - a number already in valid international E.164 (e.g. +92…, +1…) — the
+     *   CRM is used for international recruitment, and Xplogent dials E.164
+     *   numbers on its trunks; and
+     * - a short PBX extension (2-6 chars of digits, *, # or + — e.g. "505"),
+     *   which Xplogent dials on the PBX extension line (via sip/extension).
+     *   A short digit string is never a valid UK national number (those are
+     *   10-11 digits), so this cannot misclassify a UK number.
+     *
+     * Anything else (or too short) -> null.
      */
     public static function toE164(?string $number): ?string
     {
+        $clean = preg_replace('/[\s\-\(\)]/', '', trim((string) $number));
+        if ($clean === '') {
+            return null;
+        }
+
+        // Already valid international E.164 (e.g. +92…, +1…, +44…) — pass through.
+        if (preg_match('/^\+[1-9]\d{6,14}$/', $clean)) {
+            return $clean;
+        }
+
+        // Short PBX extension (e.g. "505") — pass through for the extension line.
+        if (preg_match('/^[0-9*#+]{2,6}$/', $clean)) {
+            return $clean;
+        }
+
         $digits = PhoneNumber::digits($number);
         if ($digits === '') {
             return null;
