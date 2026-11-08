@@ -39,4 +39,10 @@ return [
 
     // Largest accepted request body, in bytes.
     'max_body' => 256 * 1024,
+
+    // Short PBX extensions the AI may ring (your own phones, for test calls), e.g.
+    // XPLOGENT_TEST_EXTENSIONS=505,*43. TEST_APPLICANT_EXTENSION (the test seeder's) is
+    // included. Any other short number in an applicant's record is junk, never dialled.
+    'test_extensions' => array_values(array_filter(array_map('trim', explode(',',
+        env('XPLOGENT_TEST_EXTENSIONS', '') . ',' . env('TEST_APPLICANT_EXTENSION', ''))))),
 ];
