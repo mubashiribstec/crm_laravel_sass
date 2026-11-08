@@ -89,6 +89,73 @@ class ApplicantController extends Controller
         return strtoupper(preg_replace('/[\s\-]/', '', trim($postcode)));
     }
 
+    /**
+     * Escape LIKE wildcards so user input is matched literally
+     */
+    private static function escapeLike(string $value): string
+    {
+        return addcslashes($value, '\\%_');
+    }
+
+    /**
+     * Global search for the applicants list. The term type is detected first so each
+     * search only touches the columns (and indexes) it needs:
+     *  - phone:    digits (with optional spaces, dashes, +, brackets)
+     *  - email:    contains "@", or a single token with "." / "_" (e.g. "john.smith")
+     *  - postcode: UK postcode or outward code, with or without the space ("KT2 7EG", "KT27EG", "KT2")
+     *  - name:     anything else, word-prefix FULLTEXT search on applicant_name
+     * The table collation is case-insensitive, so no LOWER()/UPPER() wrapping is needed.
+     */
+    private static function applyApplicantSearch($query, string $searchTerm): void
+    {
+        $searchTerm = trim(preg_replace('/\s+/', ' ', $searchTerm));
+        if (mb_strlen($searchTerm) < 2) {
+            return;
+        }
+
+        // PHONE SEARCH (no phone index exists, so this one still scans)
+        if (preg_match('/^[0-9\s\-\+\(\)]+$/', $searchTerm) && strlen(preg_replace('/[^0-9]/', '', $searchTerm)) >= 2) {
+            $cleanDigits = preg_replace('/[^0-9]/', '', $searchTerm);
+            $query->where(function ($q) use ($cleanDigits) {
+                $q->whereRaw('REPLACE(REPLACE(applicants.applicant_phone, " ", ""), "-", "") LIKE ?', ['%' . $cleanDigits . '%'])
+                    ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_phone_secondary, " ", ""), "-", "") LIKE ?', ['%' . $cleanDigits . '%'])
+                    ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_landline, " ", ""), "-", "") LIKE ?', ['%' . $cleanDigits . '%']);
+            });
+            return;
+        }
+
+        // EMAIL SEARCH (prefix match on idx_applicants_email / idx_applicants_email_secondary)
+        if (str_contains($searchTerm, '@') || preg_match('/^[^\s@]*[._][^\s@]*$/', $searchTerm)) {
+            $prefix = self::escapeLike(str_replace(' ', '', $searchTerm)) . '%';
+            $query->where(function ($q) use ($prefix) {
+                $q->where('applicants.applicant_email', 'LIKE', $prefix)
+                    ->orWhere('applicants.applicant_email_secondary', 'LIKE', $prefix);
+            });
+            return;
+        }
+
+        // POSTCODE SEARCH (prefix match on the generated applicant_postcode_normalized column)
+        if (preg_match('/^[A-Z]{1,2}[0-9][A-Z0-9]?(\s?[0-9][A-Z]{0,2})?$/i', $searchTerm)) {
+            $query->where('applicants.applicant_postcode_normalized', 'LIKE', self::escapeLike(self::normalizePostcode($searchTerm)) . '%');
+            return;
+        }
+
+        // NAME SEARCH
+        // InnoDB FULLTEXT only indexes words of innodb_ft_min_token_size (default 3) or more,
+        // so shorter words are left to the btree prefix match.
+        $words = array_values(array_filter(
+            preg_split('/[^\p{L}\p{N}]+/u', $searchTerm),
+            fn ($word) => mb_strlen($word) >= 3
+        ));
+
+        if (count($words) > 0) {
+            $against = implode(' ', array_map(fn ($word) => '+' . $word . '*', $words));
+            $query->whereRaw('MATCH (applicants.applicant_name) AGAINST (? IN BOOLEAN MODE)', [$against]);
+        } else {
+            $query->where('applicants.applicant_name', 'LIKE', self::escapeLike($searchTerm) . '%');
+        }
+    }
+
     public function index()
     {
         $jobCategories = JobCategory::where('is_active', 1)->orderBy('name', 'asc')->get();
@@ -699,81 +766,15 @@ class ApplicantController extends Controller
         //     }
         // }
 
-        if ($request->filled('search.value')) {
-            $searchTerm = trim($request->input('search.value'));
-            $cleanDigits = preg_replace('/[^0-9]/', '', $searchTerm);
-            $isDigitOnly = !empty($cleanDigits) && strlen($cleanDigits) === strlen($searchTerm);
-            $firstWord = explode(' ', $searchTerm)[0];
-
-            if (strlen($searchTerm) >= 2) {
-
-                // Check for exact applicant_name match
-                $exactNameCount = Applicant::where('applicant_name', 'LIKE', '%' . $searchTerm . '%')->count();
-
-                if ($exactNameCount > 0) {
-                    // Exact name match
-                    $model->where('applicants.applicant_name', 'LIKE', '%' . $searchTerm . '%');
-                } else {
-
-                    // DIGIT SEARCH (PHONE)
-                    if ($isDigitOnly && strlen($cleanDigits) >= 2) {
-                        $model->where(function ($q) use ($cleanDigits) {
-                            // Normalize phone numbers: remove spaces and dashes
-                            $q->whereRaw('REPLACE(REPLACE(applicants.applicant_phone, " ", ""), "-", "") LIKE ?', ['%' . $cleanDigits . '%'])
-                                ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_phone_secondary, " ", ""), "-", "") LIKE ?', ['%' . $cleanDigits . '%'])
-                                ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_landline, " ", ""), "-", "") LIKE ?', ['%' . $cleanDigits . '%']);
-                        });
-                    }
-                    // POSTCODE SEARCH
-                    elseif (preg_match('/^[A-Za-z]{1,2}[0-9]{1,2}/i', $searchTerm)) {
-                        $model->where(function ($q) use ($searchTerm) {
-                            $q->whereRaw('UPPER(applicants.applicant_postcode) LIKE ?', [strtoupper($searchTerm) . '%'])
-                                ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_phone, " ", ""), "-", "") LIKE ?', ['%' . $searchTerm . '%'])
-                                ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_phone_secondary, " ", ""), "-", "") LIKE ?', ['%' . $searchTerm . '%'])
-                                ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_landline, " ", ""), "-", "") LIKE ?', ['%' . $searchTerm . '%']);
-                        });
-                    }
-                    // TEXT SEARCH (NAME / EMAIL / NOTES / RELATIONSHIPS)
-                    else {
-                        // Check if the search term is a single word (no spaces)
-                        $isSingleWord = (strpos($searchTerm, ' ') === false);
-
-                        $model->where(function ($q) use ($firstWord, $searchTerm, $isSingleWord) {
-                            if ($isSingleWord) {
-                                // If single word, check for exact match first
-                                $q->where('applicants.applicant_email', 'LIKE', $firstWord)
-                                    ->orWhere('applicants.applicant_email_secondary', 'LIKE', $firstWord);
-
-                                // PHONE SEARCH FOR TEXT TERM
-                                $q->orWhereRaw('REPLACE(REPLACE(applicants.applicant_phone, " ", ""), "-", "") LIKE ?', [$firstWord . '%'])
-                                    ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_phone_secondary, " ", ""), "-", "") LIKE ?', [$firstWord . '%'])
-                                    ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_landline, " ", ""), "-", "") LIKE ?', [$firstWord . '%']);
-                            } else {
-                                // Multiple words: search for name or email containing the first word
-                                $q->where('applicants.applicant_email', 'LIKE', '%' . $firstWord . '%')
-                                    ->orWhere('applicants.applicant_email_secondary', 'LIKE', '%' . $firstWord . '%');
-
-                                // PHONE SEARCH FOR TEXT TERM
-                                $q->orWhereRaw('REPLACE(REPLACE(applicants.applicant_phone, " ", ""), "-", "") LIKE ?', ['%' . $searchTerm . '%'])
-                                    ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_phone_secondary, " ", ""), "-", "") LIKE ?', ['%' . $searchTerm . '%'])
-                                    ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_landline, " ", ""), "-", "") LIKE ?', ['%' . $searchTerm . '%']);
-
-                                // Relationship search — only if 3+ chars
-                                if (strlen($firstWord) >= 3) {
-                                    $q->orWhereHas('jobTitle', fn($q) => $q->where('name', 'LIKE', $firstWord . '%'))
-                                        ->orWhereHas('jobCategory', fn($q) => $q->where('name', 'LIKE', $firstWord . '%'))
-                                        ->orWhereHas('jobSource', fn($q) => $q->where('name', 'LIKE', $firstWord . '%'));
-                                }
-                            }
-                        });
-                    }
-                }
-            }
-        }
-
+        // Global search is applied in the DataTables ->filter() callback below (applyApplicantSearch)
+        // so recordsTotal stays unfiltered and Yajra's own LIKE-on-every-column search is skipped.
 
         if ($request->ajax()) {
             return DataTables::eloquent($model)
+                // Replaces the default global search; per-column filterColumn() searches still apply
+                ->filter(function ($query) use ($request) {
+                    self::applyApplicantSearch($query, (string) $request->input('search.value', ''));
+                })
                 ->addIndexColumn() // This will automatically add a serial number to the rows
                 ->addColumn('job_title', function ($applicant) {
                     if (!$applicant->jobTitle)
@@ -864,9 +865,9 @@ class ApplicantController extends Controller
                     $query->where('applicants.applicant_name', 'LIKE', trim($keyword) . "%");
                 })
                 ->filterColumn('applicants.applicant_postcode', function ($query, $keyword) {
-                    // Normalize postcode search by removing spaces and dashes
+                    // Prefix match on the indexed space/dash-free copy of the postcode
                     $normalizedKeyword = self::normalizePostcode($keyword);
-                    $query->whereRaw('REPLACE(REPLACE(UPPER(applicants.applicant_postcode), " ", ""), "-", "") LIKE ?', ["%{$normalizedKeyword}%"]);
+                    $query->where('applicants.applicant_postcode_normalized', 'LIKE', self::escapeLike($normalizedKeyword) . '%');
                 })
                 ->filterColumn('job_titles.name', function ($query, $keyword) {
                     $query->where('job_titles.name', 'LIKE', trim($keyword) . "%");
