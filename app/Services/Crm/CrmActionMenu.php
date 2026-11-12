@@ -2,7 +2,9 @@
 
 namespace App\Services\Crm;
 
+use App\Support\SaleEmailRestriction;
 use Horsefly\Message;
+use Horsefly\Sale;
 use Horsefly\SentEmail;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
@@ -19,6 +21,7 @@ class CrmActionMenu
     private array $abilities = [];
     private ?array $sentEmails = null;
     private ?array $messages = null;
+    private ?array $restrictedSaleIds = null;
 
     public function __construct(
         private string $tabFilter,
@@ -77,6 +80,14 @@ class CrmActionMenu
         if ($rows->isEmpty()) {
             return;
         }
+
+        $this->restrictedSaleIds = Sale::withTrashed()
+            ->whereIn('id', $rows->pluck('sale_id')->unique()->all())
+            ->get(array_merge(['id', 'job_source_id'], SaleEmailRestriction::TEXT_COLUMNS))
+            ->filter(fn ($sale) => SaleEmailRestriction::applies($sale))
+            ->pluck('id')
+            ->flip()
+            ->all();
 
         if (in_array($this->tabFilter, self::SENT_EMAIL_TABS, true)) {
             $union = null;
@@ -181,6 +192,31 @@ class CrmActionMenu
         return json_encode([$row->applicant_phone, $row->applicant_phone_secondary]);
     }
 
+    /** Whether the Send Email button is restricted for the sale on this row. */
+    protected function isEmailRestricted($applicant): bool
+    {
+        if ($this->restrictedSaleIds !== null) {
+            return isset($this->restrictedSaleIds[$applicant->sale_id]);
+        }
+
+        $sale = Sale::withTrashed()->find($applicant->sale_id);
+
+        return $sale && SaleEmailRestriction::applies($sale);
+    }
+
+    /** The Send Email dropdown item, disabled when the sale is restricted. */
+    protected function sendEmailItem($applicant): string
+    {
+        if ($this->isEmailRestricted($applicant)) {
+            return SaleEmailRestriction::disabledDropdownItem();
+        }
+
+        return '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
+                                    data-email="' . htmlspecialchars($applicant->applicant_email ?? '', ENT_QUOTES, 'UTF-8') . '" data-secondary-email="' . htmlspecialchars($applicant->applicant_email_secondary ?? '', ENT_QUOTES, 'UTF-8') . '"
+                                    data-name="' . htmlspecialchars(ucwords($applicant->applicant_name), ENT_QUOTES, 'UTF-8') . '" data-job-title="' . htmlspecialchars($applicant->jobTitle ?? '', ENT_QUOTES, 'UTF-8') . '" data-office-name="' . htmlspecialchars($applicant->office_name ?? '', ENT_QUOTES, 'UTF-8') . '" data-unit-name="' . htmlspecialchars($applicant->unit_name ?? '', ENT_QUOTES, 'UTF-8') . '" data-position-type="' . htmlspecialchars($applicant->position_type ?? '', ENT_QUOTES, 'UTF-8') . '" data-benefits="' . htmlspecialchars($applicant->benefits ?? '', ENT_QUOTES, 'UTF-8') . '" data-salary="' . htmlspecialchars($applicant->salary ?? '', ENT_QUOTES, 'UTF-8') . '" data-timing="' . htmlspecialchars($applicant->timing ?? '', ENT_QUOTES, 'UTF-8') . '" data-experience="' . htmlspecialchars($applicant->sale_experience ?? '', ENT_QUOTES, 'UTF-8') . '" data-qualification="' . htmlspecialchars($applicant->sale_qualification ?? '', ENT_QUOTES, 'UTF-8') . '" data-location="' . htmlspecialchars($applicant->sale_postcode ?? '', ENT_QUOTES, 'UTF-8') . '">Send Email</a></li>
+                                ';
+    }
+
     /** open cvs */
     protected function openCvsButtons($applicant, $tabFilter, $formattedMessage): string
     {
@@ -241,10 +277,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                    data-email="' . $applicant->applicant_email . '"
-                                    data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                                ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -299,10 +332,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                        data-email="' . $applicant->applicant_email . '"
-                                        data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                                    ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -346,10 +376,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                data-email="' . $applicant->applicant_email . '"
-                                data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                            ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -457,10 +484,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                data-email="' . $applicant->applicant_email . '"
-                                data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                            ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -558,10 +582,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                            data-email="' . $applicant->applicant_email . '"
-                                            data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                                        ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -615,10 +636,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                            data-email="' . $applicant->applicant_email . '"
-                                            data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                                        ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -670,10 +688,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                            data-email="' . $applicant->applicant_email . '"
-                                            data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                                        ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -724,10 +739,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                    data-email="' . $applicant->applicant_email . '"
-                                    data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                                ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -779,10 +791,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                            data-email="' . $applicant->applicant_email . '"
-                                            data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                                        ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -834,10 +843,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                            data-email="' . $applicant->applicant_email . '"
-                                            data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                                        ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -879,10 +885,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                data-email="' . $applicant->applicant_email . '"
-                                data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                            ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -924,10 +927,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                            data-email="' . $applicant->applicant_email . '"
-                                            data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                                        ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -979,10 +979,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                data-email="' . $applicant->applicant_email . '"
-                                data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                            ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -1035,10 +1032,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                data-email="' . $applicant->applicant_email . '"
-                                data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                            ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -1090,10 +1084,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                data-email="' . $applicant->applicant_email . '"
-                                data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                            ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -1134,10 +1125,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                data-email="' . $applicant->applicant_email . '"
-                                data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                            ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -1179,10 +1167,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                data-email="' . $applicant->applicant_email . '"
-                                data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                            ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -1223,10 +1208,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                data-email="' . $applicant->applicant_email . '"
-                                data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                            ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }
@@ -1299,10 +1281,7 @@ class CrmActionMenu
                 $actionButtons .= '<li><a class="dropdown-item" href="javascript:void(0);" >Reply SMS</a></li>';
             }
         }
-        $actionButtons .= '<li><a class="dropdown-item email-btn" href="javascript:void(0);" data-applicant-id="' . (int)$applicant->id . '" 
-                                        data-email="' . $applicant->applicant_email . '"
-                                        data-name="' . ucwords($applicant->applicant_name) . '">Send Email</a></li>
-                                    ';
+        $actionButtons .= $this->sendEmailItem($applicant);
 
         return $actionButtons;
     }

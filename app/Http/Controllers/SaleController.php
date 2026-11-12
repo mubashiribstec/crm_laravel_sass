@@ -26,6 +26,7 @@ use App\Observers\ActionObserver;
 use App\Support\DialLink;
 use App\Support\HtmlNotes;
 use App\Support\IntelligentSearch;
+use App\Support\SaleEmailRestriction;
 use App\Support\StatusBadge;
 
 use Illuminate\Support\Facades\Auth;
@@ -1561,7 +1562,7 @@ class SaleController extends Controller
                 ->skipTotalRecords()
                 ->order(fn($query) => $applySorting($query))
                 ->addIndexColumn()
-                ->setRowClass(fn ($sale) => $sale->is_blacklist == 1 ? 'table-danger blacklisted-row' : '')
+                ->setRowClass(fn($sale) => $sale->is_blacklist == 1 ? 'table-danger blacklisted-row' : '')
                 ->addColumn('office_name', function ($sale) {
                     return $sale->office_name ? ucwords($sale->office_name) : '-';
                 })
@@ -2042,6 +2043,10 @@ class SaleController extends Controller
                     return $sale->open_date ? Carbon::parse($sale->open_date)->format('d M Y, h:i A') : '-'; // Using accessor
                 })
                 ->addColumn('status', function ($sale) {
+                    if ($sale->is_blacklist == 1) {
+                        return StatusBadge::withBlacklist($this->saleStatusBadge($sale), true);
+                    }
+
                     $status = '';
                     if ($sale->status == 1 && $sale->is_on_hold == 1) {
                         $status = '<span class="badge bg-warning">On Hold</span>';
@@ -2164,6 +2169,7 @@ class SaleController extends Controller
 
                     return $action;
                 })
+                ->setRowClass(fn($sale) => $sale->is_blacklist == 1 ? 'table-danger blacklisted-row' : '')
                 ->rawColumns(['sale_notes', 'experience', 'qualification', 'position_type', 'sale_postcode', 'cv_limit', 'open_date', 'job_title', 'job_category', 'office_name', 'unit_name', 'status', 'action', 'statusFilter'])
                 ->make(true);
         }
@@ -2284,6 +2290,11 @@ class SaleController extends Controller
         // Filter by category if it's not empty
         if ($officeFilter) {
             $model->whereIn('sales.office_id', $officeFilter);
+        }
+
+        // "Blacklisted only" checkbox
+        if ($request->boolean('blacklist_filter')) {
+            $model->where('sales.is_blacklist', 1);
         }
 
         // Filter by category if it's not empty
@@ -2462,6 +2473,10 @@ class SaleController extends Controller
                             </div>' . $urlCTA . '</div>';
                 })
                 ->addColumn('status', function ($sale) {
+                    if ($sale->is_blacklist == 1) {
+                        return StatusBadge::withBlacklist($this->saleStatusBadge($sale), true);
+                    }
+
                     $status = '';
                     if ($sale->status == 1 && $sale->is_on_hold == 1) {
                         $status = '<span class="badge bg-warning">On Hold</span>';
@@ -2562,6 +2577,7 @@ class SaleController extends Controller
 
                     return $action;
                 })
+                ->setRowClass(fn($sale) => $sale->is_blacklist == 1 ? 'table-danger blacklisted-row' : '')
                 ->rawColumns(['sale_notes', 'experience', 'salary', 'position_type', 'sale_postcode', 'qualification', 'job_title', 'cv_limit', 'rejected_date', 'job_category', 'office_name', 'unit_name', 'status', 'action', 'statusFilter'])
                 ->make(true);
         }
@@ -2675,6 +2691,11 @@ class SaleController extends Controller
             $model->whereIn('sales.job_title_id', (array) $titleFilter);
         }
 
+        // "Blacklisted only" checkbox
+        if ($request->boolean('blacklist_filter')) {
+            $model->where('sales.is_blacklist', 1);
+        }
+
         switch ($limitCountFilter) {
             case 'max':
                 $model->havingRaw('COALESCE(cv_counts.cv_count, 0) >= sales.cv_limit');
@@ -2779,6 +2800,10 @@ class SaleController extends Controller
                     return '-';
                 })
                 ->addColumn('status', function ($sale) {
+                    if ($sale->is_blacklist == 1) {
+                        return StatusBadge::withBlacklist($this->saleStatusBadge($sale), true);
+                    }
+
                     if ($sale->status == 1 && $sale->is_on_hold == 1)
                         return '<span class="badge bg-warning">On Hold</span>';
                     if ($sale->status == 1 && $sale->is_re_open == 1)
@@ -2851,7 +2876,9 @@ class SaleController extends Controller
                                 </ul>
                             </div>';
                     return $action;
-                })->rawColumns(['sale_notes', 'experience', 'salary', 'position_type', 'sale_postcode', 'qualification', 'job_title', 'cv_limit', 'closed_date', 'job_category', 'office_name', 'unit_name', 'status', 'action'])
+                })
+                ->setRowClass(fn($sale) => $sale->is_blacklist == 1 ? 'table-danger blacklisted-row' : '')
+                ->rawColumns(['sale_notes', 'experience', 'salary', 'position_type', 'sale_postcode', 'qualification', 'job_title', 'cv_limit', 'closed_date', 'job_category', 'office_name', 'unit_name', 'status', 'action'])
                 ->make(true);
         }
     }
@@ -2895,6 +2922,7 @@ class SaleController extends Controller
                 'sales.status',
                 'sales.is_on_hold',
                 'sales.is_re_open',
+                'sales.is_blacklist',
                 'sales.lat',
                 'sales.lng',
                 'sales.sale_notes',
@@ -3014,6 +3042,11 @@ class SaleController extends Controller
             $model->whereIn('sales.user_id', $userFilter);
         }
 
+        // "Blacklisted only" checkbox
+        if ($request->boolean('blacklist_filter')) {
+            $model->where('sales.is_blacklist', 1);
+        }
+
         switch ($limitCountFilter) {
             case 'max':
                 $model->havingRaw('COALESCE(cv_counts.cv_count, 0) >= sales.cv_limit');
@@ -3026,28 +3059,29 @@ class SaleController extends Controller
                 break;
         }
 
+        $now = Carbon::today();
         if ($dateRangeFilter) {
+            // A picked date range replaces the period dropdown and its 3-month default.
             [$start, $end] = explode('|', $dateRangeFilter);
             $model->whereBetween('sales.updated_at', [$start . ' 00:00:00', $end . ' 23:59:59']);
-        }
-
-        $now = Carbon::today();
-        switch ($dateFlockFilter) {
-            case 'last-3-months':
-                $model->whereBetween('sales.updated_at', [$now->copy()->subMonths(3)->startOfDay(), $now->endOfDay()]);
-                break;
-            case 'last-6-months':
-                $model->whereBetween('sales.updated_at', [$now->copy()->subMonths(9)->startOfDay(), $now->copy()->subMonths(3)->endOfDay()]);
-                break;
-            case 'last-9-months':
-                $model->whereBetween('sales.updated_at', [$now->copy()->subMonths(18)->startOfDay(), $now->copy()->subMonths(9)->endOfDay()]);
-                break;
-            case 'other':
-                $model->where('sales.updated_at', '<', $now->copy()->subMonths(18)->endOfDay());
-                break;
-            default:
-                $model->whereBetween('sales.updated_at', [$now->copy()->subMonths(3)->startOfDay(), $now->endOfDay()]);
-                break;
+        } else {
+            switch ($dateFlockFilter) {
+                case 'last-3-months':
+                    $model->whereBetween('sales.updated_at', [$now->copy()->subMonths(3)->startOfDay(), $now->endOfDay()]);
+                    break;
+                case 'last-6-months':
+                    $model->whereBetween('sales.updated_at', [$now->copy()->subMonths(9)->startOfDay(), $now->copy()->subMonths(3)->endOfDay()]);
+                    break;
+                case 'last-9-months':
+                    $model->whereBetween('sales.updated_at', [$now->copy()->subMonths(18)->startOfDay(), $now->copy()->subMonths(9)->endOfDay()]);
+                    break;
+                case 'other':
+                    $model->where('sales.updated_at', '<', $now->copy()->subMonths(18)->endOfDay());
+                    break;
+                default:
+                    $model->whereBetween('sales.updated_at', [$now->copy()->subMonths(3)->startOfDay(), $now->endOfDay()]);
+                    break;
+            }
         }
 
         if ($request->ajax()) {
@@ -3115,6 +3149,10 @@ class SaleController extends Controller
                             </div>' . $urlCTA . '</div>';
                 })
                 ->addColumn('status', function ($sale) {
+                    if ($sale->is_blacklist == 1) {
+                        return StatusBadge::withBlacklist($this->saleStatusBadge($sale), true);
+                    }
+
                     if ($sale->status == 1 && $sale->is_on_hold == 1)
                         return '<span class="badge bg-warning">On Hold</span>';
                     if ($sale->status == 1 && $sale->is_re_open == 1)
@@ -3183,7 +3221,9 @@ class SaleController extends Controller
                                 </ul>
                             </div>';
                     return $action;
-                })->rawColumns(['sale_notes', 'job_source', 'experience', 'salary', 'position_type', 'sale_postcode', 'qualification', 'cv_limit', 'job_title', 'open_date', 'job_category', 'office_name', 'unit_name', 'status', 'action'])
+                })
+                ->setRowClass(fn($sale) => $sale->is_blacklist == 1 ? 'table-danger blacklisted-row' : '')
+                ->rawColumns(['sale_notes', 'job_source', 'experience', 'salary', 'position_type', 'sale_postcode', 'qualification', 'cv_limit', 'job_title', 'open_date', 'job_category', 'office_name', 'unit_name', 'status', 'action'])
                 ->make(true);
         }
     }
@@ -3220,6 +3260,7 @@ class SaleController extends Controller
                 'sales.status',
                 'sales.is_on_hold',
                 'sales.is_re_open',
+                'sales.is_blacklist',
                 'sales.lat',
                 'sales.lng',
                 'sales.sale_notes',
@@ -3312,6 +3353,11 @@ class SaleController extends Controller
 
         if ($titleFilter) {
             $model->whereIn('sales.job_title_id', $titleFilter);
+        }
+
+        // "Blacklisted only" checkbox
+        if ($request->boolean('blacklist_filter')) {
+            $model->where('sales.is_blacklist', 1);
         }
 
         // CV-limit filter is the only case that needs the cv_notes aggregation in SQL.
@@ -3505,6 +3551,13 @@ class SaleController extends Controller
                         : "<span class='badge w-100 bg-primary' style='font-size:90%'>" . ((int) $sale->cv_limit - (int) $sale->no_of_sent_cv . '/' . (int) $sale->cv_limit) . "<br>Limit Remains</span>";
                 })
                 ->addColumn('status', function ($sale) {
+                    if ($sale->is_blacklist == 1) {
+                        $status = $sale->status == 1 && $sale->is_on_hold == 2
+                            ? '<span class="badge bg-warning">Pending On Hold</span>'
+                            : $this->saleStatusBadge($sale);
+                        return StatusBadge::withBlacklist($status, true);
+                    }
+
                     if ($sale->status == 1 && $sale->is_on_hold == 1) {
                         return '<span class="badge bg-warning">On Hold</span>';
                     }
@@ -3643,6 +3696,7 @@ class SaleController extends Controller
 
                     return $action;
                 })
+                ->setRowClass(fn($sale) => $sale->is_blacklist == 1 ? 'table-danger blacklisted-row' : '')
                 ->rawColumns(['sale_notes', 'experience', 'job_source', 'salary', 'position_type', 'sale_postcode', 'qualification', 'cv_limit', 'job_title', 'open_date', 'job_category', 'office_name', 'unit_name', 'status', 'action'])
                 ->make(true);
         }
@@ -3747,6 +3801,11 @@ class SaleController extends Controller
 
         if ($sourceFilter) {
             $model->whereIn('sales.job_source_id', $sourceFilter);
+        }
+
+        // "Blacklisted only" checkbox
+        if ($request->boolean('blacklist_filter')) {
+            $model->where('sales.is_blacklist', 1);
         }
 
         // Filter by category if it's not empty
@@ -3890,6 +3949,10 @@ class SaleController extends Controller
                             </div>' . $urlCTA . '</div>';
                 })
                 ->addColumn('status', function ($sale) {
+                    if ($sale->is_blacklist == 1) {
+                        return StatusBadge::withBlacklist($this->saleStatusBadge($sale), true);
+                    }
+
                     $status = '';
                     if ($sale->status == 1 && $sale->is_on_hold == 1) {
                         $status = '<span class="badge bg-warning">On Hold</span>';
@@ -3987,6 +4050,7 @@ class SaleController extends Controller
 
                     return $action;
                 })
+                ->setRowClass(fn($sale) => $sale->is_blacklist == 1 ? 'table-danger blacklisted-row' : '')
                 ->rawColumns(['sale_notes', 'position_type', 'experience', 'salary', 'sale_postcode', 'qualification', 'cv_limit', 'job_title', 'job_category', 'office_name', 'unit_name', 'status', 'action'])
                 ->make(true);
         }
@@ -4006,7 +4070,8 @@ class SaleController extends Controller
         $radius  = (float) ($validated['radius'] ?? 15);
 
         // Load the sale together with its job title row (for related_titles)
-        $sale = Sale::with('jobTitle')->findOrFail($sale_id);
+        $sale = Sale::with(['jobTitle', 'jobCategory', 'office', 'unit'])->findOrFail($sale_id);
+        $is_email_restricted = SaleEmailRestriction::applies($sale);
 
         if ($sale->lat === null || $sale->lng === null) {
             return response()->json(['error' => 'Sale location coordinates are missing.'], 422);
@@ -4074,7 +4139,6 @@ class SaleController extends Controller
                 $model->orderByRaw('notes_created_at DESC');
             }
         } else {
-            // ✅ Default: latest note date first
             $model->orderByRaw('notes_created_at DESC');
         }
 
@@ -4188,7 +4252,6 @@ class SaleController extends Controller
                 }
             })
             ->addColumn('applicantNotes', function ($applicant) use ($sale_id) {
-                // ✅ Just use notes_details, fall back to applicant_notes field
                 $notesDetails = $applicant->notes_details ?? $applicant->applicant_notes;
                 $notes = HtmlNotes::toSafeHtml($notesDetails);
 
@@ -4266,7 +4329,9 @@ class SaleController extends Controller
                 });
             })
             ->addColumn('notes_created_at', function ($applicant) {
-                return Carbon::parse($applicant->notes_created_at)->format('d M Y, h:i A');
+                $createdAt = $applicant->notes_created_at ?? $applicant->updated_at;
+
+                return Carbon::parse($createdAt)->format('d M Y, h:i A');
             })
             ->addColumn('applicant_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->applicant_cv, $applicant->is_blocked, 'original', 'success', 'Download CV'))
             ->addColumn('crm_resume', fn ($applicant) => CvStorage::linkCell($applicant->id, $applicant->updated_cv, $applicant->is_blocked, 'updated', 'primary', 'Download Updated CV'))
@@ -4304,8 +4369,9 @@ class SaleController extends Controller
 
                 return '<span class="badge ' . $color_class . '">' . ucwords($status_value) . '</span>';
             })
-            ->addColumn('action', function ($applicant) use ($sale_id, $sale, $sale_cv_counts) {
+            ->addColumn('action', function ($applicant) use ($sale_id, $sale, $sale_cv_counts, $is_email_restricted) {
                 $status_value = $this->getApplicantStatusForSale($applicant, $sale_id);
+                $escapeAttribute = fn ($value) => e((string) ($value ?? ''));
 
                 $html = '<div class="btn-group dropstart">
                         <button type="button" class="border-0 bg-transparent p-0" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
@@ -4313,34 +4379,61 @@ class SaleController extends Controller
                         </button>
                         <ul class="dropdown-menu">';
 
-                if ($status_value == 'open') {
-                    $html .= '<li><a href="javascript:void(0);" onclick="markNotInterestedModal(' . $applicant->id . ', ' . $sale_id . ')" class="dropdown-item">Mark Not Interested On Sale</a></li>
+                if ($applicant->is_blocked) {
+                    $html .= '<li><button type="button" class="btn btn-light btn-sm disabled d-inline-flex align-items-center">
+                                    <iconify-icon icon="solar:lock-bold" class="fs-14 me-1"></iconify-icon> Blocked
+                                </button></li>';
+                } else {
+
+                    if ($status_value == 'open') {
+                        $html .= '<li><a href="javascript:void(0);" onclick="markNotInterestedModal(' . $applicant->id . ', ' . $sale_id . ')" class="dropdown-item">Mark Not Interested On Sale</a></li>
                               <li><a href="javascript:void(0);" class="dropdown-item" onclick="markNoNursingHomeModal(' . $applicant->id . ')">Mark No Nursing Home</a></li>';
 
-                    if ($sale->is_on_hold != 0) {
-                        $html .= '<li><a href="javascript:void(0)" class="dropdown-item"><span><small class="text-danger">(Sale On Hold)</small></span></a></li>';
-                    } elseif ($sale_cv_counts >= $sale->cv_limit && $sale->is_on_hold == 0) {
-                        $html .= '<li><a href="javascript:void(0)" class="dropdown-item"><span><small class="text-danger">(CV Limit Reached)</small></span></a></li>';
-                    } else {
-                        $html .= '<li>
+                        if ($is_email_restricted) {
+                            $html .= SaleEmailRestriction::disabledDropdownItem();
+                        } elseif ($applicant->applicant_email || $applicant->applicant_email_secondary) {
+                            $html .= '<li><a href="javascript:void(0);" class="dropdown-item email-btn"
+                                data-applicant-id="' . (int) $applicant->id . '"
+                                data-sale-id="' . (int) $sale_id . '"
+                                data-email="' . $escapeAttribute($applicant->applicant_email) . '"
+                                data-secondary-email="' . $escapeAttribute($applicant->applicant_email_secondary) . '"
+                                data-name="' . $escapeAttribute($applicant->applicant_name) . '"
+                                data-job-title="' . $escapeAttribute($sale->jobTitle?->name) . '"
+                                data-office-name="' . $escapeAttribute($sale->office?->office_name) . '"
+                                data-unit-name="' . $escapeAttribute($sale->unit?->unit_name) . '"
+                                data-position-type="' . $escapeAttribute($sale->position_type) . '"
+                                data-benefits="' . $escapeAttribute($sale->benefits) . '"
+                                data-salary="' . $escapeAttribute($sale->salary) . '"
+                                data-timing="' . $escapeAttribute($sale->timing) . '"
+                                data-experience="' . $escapeAttribute($sale->experience) . '"
+                                data-qualification="' . $escapeAttribute($sale->qualification) . '"
+                                data-location="' . $escapeAttribute($sale->sale_postcode) . '">Send Email</a></li>';
+                        }
+
+                        if ($sale->is_on_hold != 0) {
+                            $html .= '<li><a href="javascript:void(0)" class="dropdown-item"><span><small class="text-danger">(Sale On Hold)</small></span></a></li>';
+                        } elseif ($sale_cv_counts >= $sale->cv_limit && $sale->is_on_hold == 0) {
+                            $html .= '<li><a href="javascript:void(0)" class="dropdown-item"><span><small class="text-danger">(CV Limit Reached)</small></span></a></li>';
+                        } else {
+                            $html .= '<li>
                                 <a href="javascript:void(0);" class="dropdown-item"
                                 onclick="sendCVModal('
-                            . (int) $applicant->id . ','
-                            . (int) $sale_id . ','
-                            . htmlspecialchars(json_encode($applicant->applicant_postcode), ENT_QUOTES, 'UTF-8') . ','
-                            . (int) $applicant->have_nursing_home_experience . ')">
+                                . (int) $applicant->id . ','
+                                . (int) $sale_id . ','
+                                . htmlspecialchars(json_encode($applicant->applicant_postcode), ENT_QUOTES, 'UTF-8') . ','
+                                . (int) $applicant->have_nursing_home_experience . ')">
                                     <span>Send CV</span>
                                 </a>
                             </li>';
-                    }
+                        }
 
-                    $html .= '<li><a href="javascript:void(0);" class="dropdown-item" onclick="markApplicantCallbackModal(' . $applicant->id . ', ' . $sale_id . ')">Mark Callback</a></li>';
-                } elseif ($status_value == 'sent' || $status_value == 'reject_job' || $status_value == 'paid') {
-                    $html .= '<li><button type="button" class="btn btn-light btn-sm disabled d-inline-flex align-items-center">
+                        $html .= '<li><a href="javascript:void(0);" class="dropdown-item" onclick="markApplicantCallbackModal(' . $applicant->id . ', ' . $sale_id . ')">Mark Callback</a></li>';
+                    } elseif ($status_value == 'sent' || $status_value == 'reject_job' || $status_value == 'paid') {
+                        $html .= '<li><button type="button" class="btn btn-light btn-sm disabled d-inline-flex align-items-center">
                                     <iconify-icon icon="solar:lock-bold" class="fs-14 me-1"></iconify-icon> Locked
                                 </button></li>';
+                    }
                 }
-
                 $html .= '</ul></div>';
                 return $html;
             })
@@ -4625,6 +4718,7 @@ class SaleController extends Controller
                 'title_filter',
                 'office_filter',
                 'user_filter',
+                'blacklist_filter',
                 'cv_limit_filter',
                 'date_range_filter',
                 'date_flock_filter',

@@ -9,6 +9,7 @@ use Horsefly\Unit;
 use Horsefly\Message;
 use Horsefly\EmailTemplate;
 use Horsefly\Applicant;
+use Horsefly\Setting;
 use App\Http\Controllers\Controller;
 use Yajra\DataTables\Facades\DataTables;
 use Illuminate\Support\Facades\DB;
@@ -70,24 +71,24 @@ class CommunicationController extends Controller
         $unit = Unit::where('office_id', $sale->office_id)->first();
         $JobCategory = JobCategory::where('id', $sale->job_category_id)->first();
         $job_category = $sale->job_category_id;
-        $job_postcode = $sale->sale_postcode;
         $job_title = $sale->job_title_id;
 
         $nearby_applicants = $this->distance($sale->lat, $sale->lng, $radius, $job_title, $job_category);
         $emails = is_null($nearby_applicants) ? '' : implode(',', $nearby_applicants->toArray());
 
-        $user_name = Auth::user()->name;
+        $user_pseudo_name = Auth::user()->pseudo_name ?: Auth::user()->name;
 
         // Template filling shared with the Xplogent API (App\Services\Xplogent\VacancyEmailService).
         $formattedMessage = '';
         $subject = '';
-        if ($filled = app(VacancyEmailService::class)->fill($sale, $user_name)) {
+        if ($filled = app(VacancyEmailService::class)->fill($sale, $user_pseudo_name)) {
             $formattedMessage = $filled['body'];
             $subject = $filled['subject'];
         }
 
         return view('emails.send-email-to-applicant', compact('sale', 'unit', 'subject', 'formattedMessage', 'emails'));
     }
+    
     function distance($lat, $lon, $radius, $job_title_id, $job_category_id)
     {
         $location_distance = Applicant::with('cv_notes')
@@ -383,7 +384,15 @@ class CommunicationController extends Controller
 
                 foreach ($dataEmail as $email) {
                     $applicant = Applicant::where('applicant_email', $email)->orWhere('applicant_email_secondary', $email)->first();
-                    $is_save = $this->saveEmailDB($email, $email_from, $email_subject, $email_body, $email_title, $applicant->id, $sale_id);
+                    $is_save = $this->saveEmailDB(
+                        $email,
+                        $email_from,
+                        $email_subject,
+                        $email_body,
+                        $email_title,
+                        $applicant->id,
+                        $sale_id
+                    );
                     if (!$is_save) {
                         // Optional: throw or log
                         Log::warning('Email saved to DB failed for applicant ID: ' . $applicant->id);
@@ -399,33 +408,44 @@ class CommunicationController extends Controller
     public function saveComposedEmail(Request $request)
     {
         try {
-            $emailData = $request->input('app_email');
-            $from_email = $request->input('from_email') ?? 'info@kingsburypersonnel.com';
+            $validated = $request->validate([
+                'app_email' => 'required|email',
+                'sale_id' => 'nullable|integer|exists:sales,id',
+                'email_title' => 'nullable|string|max:191',
+                'email_subject' => 'required|string|max:191',
+                'email_body' => 'required|string',
+            ]);
 
-            if ($emailData != null) {
-                $dataEmail = explode(',', $emailData);
+            $applicant = Applicant::where('applicant_email', $validated['app_email'])
+                ->orWhere('applicant_email_secondary', $validated['app_email'])
+                ->first();
 
-                $email_from = $from_email;
-                $email_subject = $request->input('email_subject');
-                $email_body = $request->input('email_body');
-                $email_title = $request->input('email_subject');
+            $fromEmail = Setting::where('key', 'primary_email_address')->value('value')
+                ?: 'info@kingsburypersonnel.com';
+            $title = $validated['email_title'] ?? $validated['email_subject'];
+            $isSaved = $this->saveEmailDB(
+                $validated['app_email'],
+                $fromEmail,
+                $validated['email_subject'],
+                $validated['email_body'],
+                $title,
+                $applicant?->id,
+                $validated['sale_id'] ?? null
+            );
 
-                foreach ($dataEmail as $email) {
-                    $applicant = Applicant::where('applicant_email', $email)->orWhere('applicant_email_secondary', $email)->first();
-                    if ($applicant) {
-                        $is_save = $this->saveEmailDB($email, $email_from, $email_subject, $email_body, $email_title, $applicant->id);
-                    } else {
-                        $is_save = $this->saveEmailDB($email, $email_from, $email_subject, $email_body, $email_title, null);
-                    }
-                    if (!$is_save) {
-                        // Optional: throw or log
-                        Log::warning('Email saved to DB failed');
-                        throw new \Exception('Email is not stored in DB');
-                    } else {
-                        return response()->json(['success' => true, 'message' => 'Email saved successfully']);
-                    }
-                }
+            if (!$isSaved) {
+                Log::warning('Composed email could not be saved to sent_emails.', [
+                    'applicant_id' => $applicant?->id,
+                    'recipient' => $validated['app_email'],
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email could not be queued. Please try again.',
+                ], 500);
             }
+
+            return response()->json(['success' => true, 'message' => 'Email queued successfully.']);
         } catch (\Exception $e) {
             return  response()->json(['success' => false, 'message' => $e->getMessage()], 422);
         }

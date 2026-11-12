@@ -15,22 +15,8 @@
         <div class="col-lg-12">
             <div class="card">
                 <div class="card-header border-0">
-                    <div class="row justify-content-between">
-                        <div class="col-lg-3">
-                            <div class="text-md-start mt-3 pt-1">
-                                <div class="input-group">
-                                    <div class="position-relative flex-grow-1" style="display: flex;">
-                                        <input type="text" id="customSearchInput" class="form-control w-100"
-                                            placeholder="Search ...">
-                                        <button class="d-none" id="customClearBtn" type="button" title="Clear"><i
-                                                class="ri-close-line"></i></button>
-                                    </div>
-                                    <button class="btn btn-primary" id="customSearchBtn" type="button"><i
-                                            class="ri-search-line"></i> Search</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-9">
+                    <div class="row justify-content-end">
+                        <div class="col-lg-12">
                             <div class="text-md-end mt-3">
                                 <!-- user Filter Dropdown -->
                                 <div class="dropdown d-inline">
@@ -56,10 +42,10 @@
                                                     style="display:none">Deselect All</a>
                                             </div>
                                             <!-- <div class="form-check">
-                                                    <input class="form-check-input user-filter" type="checkbox" value=""
-                                                        id="all-Users" data-title-id="">
-                                                    <label class="form-check-label" for="all-Users">All Users</label>
-                                                </div> -->
+                                                        <input class="form-check-input user-filter" type="checkbox" value=""
+                                                            id="all-Users" data-title-id="">
+                                                        <label class="form-check-label" for="all-Users">All Users</label>
+                                                    </div> -->
 
                                             @foreach ($users as $user)
                                                 <div class="form-check">
@@ -98,10 +84,10 @@
                                                     style="display:none">Deselect All</a>
                                             </div>
                                             <!-- <div class="form-check">
-                                                    <input class="form-check-input office-filter" type="checkbox" value=""
-                                                        id="all-offices" data-title-id="">
-                                                    <label class="form-check-label" for="all-offices">All Head Office</label>
-                                                </div> -->
+                                                        <input class="form-check-input office-filter" type="checkbox" value=""
+                                                            id="all-offices" data-title-id="">
+                                                        <label class="form-check-label" for="all-offices">All Head Office</label>
+                                                    </div> -->
 
                                             @foreach ($offices as $office)
                                                 <div class="form-check">
@@ -142,10 +128,10 @@
                                                     style="display:none">Deselect All</a>
                                             </div>
                                             <!-- <div class="form-check">
-                                                    <input class="form-check-input category-filter" type="checkbox" value=""
-                                                        id="all-categories" data-title-id="">
-                                                    <label class="form-check-label" for="all-categories">All Category</label>
-                                                </div> -->
+                                                        <input class="form-check-input category-filter" type="checkbox" value=""
+                                                            id="all-categories" data-title-id="">
+                                                        <label class="form-check-label" for="all-categories">All Category</label>
+                                                    </div> -->
 
                                             @foreach ($jobCategories as $category)
                                                 <div class="form-check">
@@ -197,10 +183,10 @@
                                                     style="display:none">Deselect All</a>
                                             </div>
                                             <!-- <div class="form-check">
-                                                    <input class="form-check-input title-filter" type="checkbox" value=""
-                                                        id="all-titles" data-title-id="">
-                                                    <label class="form-check-label" for="all-titles">All Titles</label>
-                                                </div> -->
+                                                        <input class="form-check-input title-filter" type="checkbox" value=""
+                                                            id="all-titles" data-title-id="">
+                                                        <label class="form-check-label" for="all-titles">All Titles</label>
+                                                    </div> -->
                                             @foreach ($jobTitles as $title)
                                                 <div class="form-check">
                                                     <input class="form-check-input title-filter" type="checkbox"
@@ -268,8 +254,29 @@
                                         <a class="dropdown-item cv-limit-filter" href="#">Max</a>
                                     </div>
                                 </div>
+                                <!-- Blacklisted only checkbox -->
+                                <label class="btn btn-outline-primary me-1 my-1 mb-1" for="blacklistedOnlyFilter">
+                                    <input class="form-check-input mt-0 me-1" type="checkbox" id="blacklistedOnlyFilter" autocomplete="off">
+                                    Blacklisted only
+                                </label>
                             </div>
                         </div><!-- end col-->
+                    </div>
+                    <div class="row justify-content-start">
+                        <div class="col-lg-3">
+                            <div class="text-md-start mt-3 pt-1">
+                                <div class="input-group">
+                                    <div class="position-relative flex-grow-1" style="display: flex;">
+                                        <input type="text" id="customSearchInput" class="form-control w-100"
+                                            placeholder="Search ...">
+                                        <button class="d-none" id="customClearBtn" type="button" title="Clear"><i
+                                                class="ri-close-line"></i></button>
+                                    </div>
+                                    <button class="btn btn-primary" id="customSearchBtn" type="button"><i
+                                            class="ri-search-line"></i> Search</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -280,6 +287,23 @@
         <div class="col-xl-12">
             <div class="card">
                 <div class="card-body p-3">
+                    <!-- Columns Visibility Dropdown — moved via JS (initComplete) next to the "Show X entries" control. -->
+                    <div id="columnsToolbar" class="dropdown d-inline">
+                        <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button"
+                            id="dropdownMenuColumns" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="ri-layout-column-line me-1"></i> Columns
+                        </button>
+                        <div class="dropdown-menu filter-dropdowns p-2" aria-labelledby="dropdownMenuColumns"
+                            style="min-width: 230px;">
+                            <div class="d-flex justify-content-between align-items-center px-1 mb-2">
+                                <a href="#" id="columnsSelectAll" class="text-primary small fw-semibold">Show
+                                    All</a>
+                                <a href="#" id="columnsResetDefault" class="text-secondary small fw-semibold">Reset
+                                    Default</a>
+                            </div>
+                            <div id="columnsList" style="max-height: 280px; overflow-y: auto;"></div>
+                        </div>
+                    </div>
                     <div class="table-responsive">
                         <table id="sales_table" class="table align-middle mb-3">
                             <thead class="bg-light-subtle">
@@ -399,19 +423,15 @@
                     toggleable: false
                 },
                 {
-                    title: 'Created Date',
+                    title: 'Date',
                     default: true
                 },
                 {
-                    title: 'Updated Date',
-                    default: false
+                    title: 'Hold Date',
+                    default: true
                 },
                 {
-                    title: 'Open Date',
-                    default: false
-                },
-                {
-                    title: 'Agent',
+                    title: 'Agent Name',
                     default: true
                 },
                 {
@@ -472,7 +492,7 @@
                 },
             ];
 
-            const COLUMN_VISIBILITY_STORAGE_KEY = 'open_sales_table_column_visibility_v1';
+            const COLUMN_VISIBILITY_STORAGE_KEY = 'pending_on_hold_sales_table_column_visibility_v1';
 
             function loadColumnVisibility() {
                 let stored = {};
@@ -544,19 +564,20 @@
                     data: function(d) {
                         // Add the current filter to the request parameters
                         d.type_filter =
-                        currentTypeFilter; // Send the current filter value as a parameter
+                            currentTypeFilter; // Send the current filter value as a parameter
                         d.category_filter =
-                        currentCategoryFilters; // Send the current filter value as a parameter
+                            currentCategoryFilters; // Send the current filter value as a parameter
                         d.title_filter =
-                        currentTitleFilters; // Send the current filter value as a parameter
+                            currentTitleFilters; // Send the current filter value as a parameter
                         d.office_filter =
-                        currentOfficeFilters; // Send the current filter value as a parameter
+                            currentOfficeFilters; // Send the current filter value as a parameter
                         d.user_filter =
-                        currentUserFilters; // Send the current filter value as a parameter
+                            currentUserFilters; // Send the current filter value as a parameter
+                        d.blacklist_filter = $('#blacklistedOnlyFilter').is(':checked') ? 1 : 0;
                         d.cv_limit_filter =
-                        currentCVLimitFilter; // Send the current filter value as a parameter
+                            currentCVLimitFilter; // Send the current filter value as a parameter
                         d.source_filter =
-                        currentSourceFilters; // Send the current filter value as a parameter
+                            currentSourceFilters; // Send the current filter value as a parameter
                     },
                     beforeSend: function() {
                         showLoader(); // Show loader before AJAX request starts
@@ -565,7 +586,7 @@
                         console.error('DataTable AJAX error:', xhr.status, xhr.responseJSON);
                         $('#sales_table tbody').empty().html(
                             '<tr><td colspan="100%" class="text-center">Failed to load data</td></tr>'
-                            );
+                        );
                     }
                 },
                 columns: [{
@@ -647,8 +668,7 @@
                         orderable: false
                     }
                 ],
-                columnDefs: [
-                    {
+                columnDefs: [{
                         targets: 10, // Column index for 'job_details'
                         createdCell: function(td, cellData, rowData, row, col) {
                             $(td).css('text-align', 'center'); // Center the text in this column
@@ -683,11 +703,16 @@
                         createdCell: function(td, cellData, rowData, row, col) {
                             $(td).css('text-align', 'center'); // Center the text in this column
                         }
+                    },
+                    {
+                        // Applies the saved/default column visibility on the very first draw
+                        targets: getHiddenColumnIndices(),
+                        visible: false
                     }
                 ],
                 rowId: function(data) {
                     return 'row_' + data
-                    .id; // Assign a unique ID to each row using the 'id' field from the data
+                        .id; // Assign a unique ID to each row using the 'id' field from the data
                 },
                 // 'l' (length control) wrapped in its own flex row so the "Columns" button
                 // (moved here in initComplete below) lines up beside it instead of stacking
@@ -876,6 +901,10 @@
 
                 $('#showFilterType').html(formattedText);
                 table.ajax.reload(); // Reload with updated type filter
+            });
+            // Blacklisted only checkbox
+            $('#blacklistedOnlyFilter').on('change', function() {
+                table.ajax.reload();
             });
             // cv limit filter dropdown handler
             $('.cv-limit-filter').on('click', function() {
@@ -1338,7 +1367,7 @@
                 error: function(xhr) {
                     $(`#${modalId} .modal-body`).html(
                         '<p class="text-danger">There was an error retrieving the notes. Please try again later.</p>'
-                        );
+                    );
                 }
             });
         }
@@ -1548,7 +1577,7 @@
                 const originalText = btn.html();
                 btn.prop('disabled', true).html(
                     '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...'
-                    );
+                );
 
                 $.ajax({
                     url: '{{ route('storeSaleNotes') }}',
@@ -1658,7 +1687,7 @@
                 error: function(xhr) {
                     $(`#${modalId} .modal-body`).html(
                         '<p class="text-danger">There was an error retrieving the documents. Please try again later.</p>'
-                        );
+                    );
                 }
             });
         }

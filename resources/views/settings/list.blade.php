@@ -63,6 +63,8 @@
                     <div class="list-group list-group-flush settings-menu" id="settings-menu">
                         <button class="list-group-item list-group-item-action active" data-target="#form-general"
                             type="button" id="menu-general" aria-controls="form-general">General Settings</button>
+                        <button class="list-group-item list-group-item-action" data-target="#form-email-signature"
+                            type="button" id="menu-email-signature" aria-controls="form-email-signature">Email Signature</button>
                         <button class="list-group-item list-group-item-action" data-target="#form-version"
                             type="button" id="menu-version" aria-controls="form-version">Application Version</button>
                         <button class="list-group-item list-group-item-action" data-target="#form-profile" type="button"
@@ -100,8 +102,51 @@
                                     <input type="text" class="form-control" id="site_name" name="site_name"
                                         value="{{ old('site_name') }}">
                                 </div>
+                                <div class="mb-3">
+                                    <label for="primary_email_address" class="form-label">Primary Email Address</label>
+                                    <input type="email" class="form-control" id="primary_email_address"
+                                        name="primary_email_address" maxlength="255" required>
+                                    <div class="form-text">Used as the From address for outgoing emails.</div>
+                                </div>
                                 <div class="text-end">
                                     <button type="submit" class="btn btn-success">Save General</button>
+                                </div>
+                            </form>
+                        </section>
+                        <section id="form-email-signature" class="settings-form-section">
+                            <form id="emailSignatureSettingsForm" data-type="email-signature"
+                                enctype="multipart/form-data">
+                                @csrf
+                                <div class="mb-3">
+                                    <label for="email_signature_image" class="form-label">Signature Image</label>
+                                    <input type="file" class="form-control" id="email_signature_image"
+                                        name="email_signature_image" accept="image/*">
+                                    <div class="form-text">Upload a JPG, PNG, GIF, or WebP image up to 2 MB.</div>
+                                    <img id="emailSignatureImagePreview" class="mt-2 border rounded d-none"
+                                        alt="Email signature image preview" style="max-width: 180px; max-height: 100px;">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="email_signature_company_name" class="form-label">Company Name</label>
+                                    <input type="text" class="form-control" id="email_signature_company_name"
+                                        name="email_signature_company_name" maxlength="191" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="email_signature_phone" class="form-label">Phone</label>
+                                    <input type="text" class="form-control" id="email_signature_phone"
+                                        name="email_signature_phone" maxlength="50" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="email_signature_email" class="form-label">Signature Email</label>
+                                    <input type="email" class="form-control" id="email_signature_email"
+                                        name="email_signature_email" maxlength="255" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="email_signature_address" class="form-label">Signature Address</label>
+                                    <textarea class="form-control" id="email_signature_address"
+                                        name="email_signature_address" rows="3" maxlength="500" required></textarea>
+                                </div>
+                                <div class="text-end">
+                                    <button type="submit" class="btn btn-success">Save Email Signature</button>
                                 </div>
                             </form>
                         </section>
@@ -699,6 +744,20 @@
             const scraperCardTemplateHtml = $('#scraperCardTemplate').html();
             const $scraperCards = $('#scraperCards');
 
+            $('#email_signature_image').on('change', function() {
+                const file = this.files && this.files[0];
+                const $preview = $('#emailSignatureImagePreview');
+                if (!file) {
+                    return;
+                }
+
+                if ($preview.data('preview-url')) {
+                    URL.revokeObjectURL($preview.data('preview-url'));
+                }
+                const previewUrl = URL.createObjectURL(file);
+                $preview.data('preview-url', previewUrl).attr('src', previewUrl).removeClass('d-none');
+            });
+
             // Debugging: Log available sections and initial state
             console.log('Available form sections:', $formSections.length, $formSections);
             console.log('Initial active section:', $('.settings-form-section.active').attr('id'));
@@ -718,6 +777,41 @@
                     // General Settings
                     if (data.general) {
                         $('#site_name').val(data.general.site_name || '');
+                    }
+                    $('#primary_email_address').val('info@kingsburypersonnel.com');
+                    $('#email_signature_company_name').val('Kingsbury Personnel');
+                    $('#email_signature_phone').val('01494 418312');
+                    $('#email_signature_email').val('');
+                    $('#email_signature_address').val('');
+                    const signatureSettings = Object.assign({}, data.email || {}, data.signature || {});
+                    if (data.email) {
+                        $('#primary_email_address').val(
+                            data.email.primary_email_address || 'info@kingsburypersonnel.com'
+                        );
+                    }
+                    if (signatureSettings) {
+                        $('#email_signature_company_name').val(
+                            signatureSettings.email_signature_company_name || 'Kingsbury Personnel'
+                        );
+                        $('#email_signature_phone').val(
+                            signatureSettings.email_signature_phone || '01494 418312'
+                        );
+                        $('#email_signature_email').val(
+                            signatureSettings.email_signature_email || ''
+                        );
+                        $('#email_signature_address').val(
+                            signatureSettings.email_signature_address || ''
+                        );
+
+                        if (signatureSettings.email_signature_image) {
+                            const imagePath = signatureSettings.email_signature_image;
+                            const imageUrl = imagePath.startsWith('uploads/')
+                                ? '{{ asset('') }}' + imagePath
+                                : '{{ asset('storage') }}/' + imagePath;
+                            $('#emailSignatureImagePreview')
+                                .attr('src', imageUrl)
+                                .removeClass('d-none');
+                        }
                     }
 
                     // Profile Settings
@@ -1179,7 +1273,40 @@
                 const $btn = $form.find('[type="submit"]');
                 const originalText = $btn.html();
 
-                if (formType === 'smtp') {
+                if (formType === 'email-signature') {
+                    const formData = new FormData(this);
+                    $btn.prop('disabled', true).html(
+                        '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...'
+                    );
+
+                    $.ajax({
+                        url: '{{ route('settings.email-signature.save') }}',
+                        method: 'POST',
+                        data: formData,
+                        processData: false,
+                        contentType: false,
+                        success: function(response) {
+                            if (response.success) {
+                                toastr.success(response.message);
+                                if (response.image_url) {
+                                    $('#emailSignatureImagePreview')
+                                        .attr('src', response.image_url)
+                                        .removeClass('d-none');
+                                }
+                                $('#email_signature_image').val('');
+                            } else {
+                                toastr.error(response.message || 'Failed to save email signature settings.');
+                            }
+                        },
+                        error: function(xhr) {
+                            const message = xhr.responseJSON?.message || 'Failed to save email signature settings.';
+                            toastr.error(message);
+                        },
+                        complete: function() {
+                            $btn.prop('disabled', false).html(originalText);
+                        }
+                    });
+                } else if (formType === 'smtp') {
                     const formData = new FormData(this);
 
                     // disable + show loader
@@ -1236,7 +1363,7 @@
                         error: function(xhr) {
                             console.error('Error saving general settings:', xhr.responseText);
                             toastr.error('Failed to save general settings: ' + (xhr.responseJSON
-                                ?.error || 'Unknown error'));
+                                ?.message || xhr.responseJSON?.error || 'Unknown error'));
                         },
                         complete: function() {
                             // restore button

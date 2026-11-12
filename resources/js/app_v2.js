@@ -861,18 +861,137 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     $(document).on('click', '.email-btn', function() {
-        const applicantId = $(this).data('applicant-id');
-        const email = $(this).data('email');
-        const name = $(this).data('name');
+        const action = $(this);
+        const applicantId = action.data('applicant-id');
+        const email = action.data('email');
+        const secondaryEmail = action.data('secondary-email');
+        const name = action.data('name');
+        const emails = [email, secondaryEmail]
+            .filter(value => typeof value === 'string' && value.trim() !== '')
+            .map(value => value.trim())
+            .filter((value, index, values) => values.indexOf(value) === index);
+        const emailTo = $('#emailTo');
+        const senderName = String($('#emailForm').data('sender-pseudo-name') || '').trim();
+        const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[character]);
+        const renderRichText = value => {
+            const allowedTags = new Set(['B', 'BR', 'DIV', 'EM', 'I', 'LI', 'OL', 'P', 'STRONG', 'U', 'UL']);
+            const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'SVG', 'MATH']);
+            const parsed = new DOMParser().parseFromString(String(value ?? ''), 'text/html');
+            const cleanChildren = (source, target) => {
+                Array.from(source.childNodes).forEach(node => {
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        target.appendChild(document.createTextNode(node.nodeValue || ''));
+                    } else if (node.nodeType === Node.ELEMENT_NODE && !blockedTags.has(node.tagName)) {
+                        if (allowedTags.has(node.tagName)) {
+                            const element = document.createElement(node.tagName.toLowerCase());
+                            cleanChildren(node, element);
+                            target.appendChild(element);
+                        } else {
+                            cleanChildren(node, target);
+                        }
+                    }
+                });
+            };
+            const clean = document.createElement('div');
+            cleanChildren(parsed.body, clean);
+            return clean.innerHTML;
+        };
+        const rowValue = key => {
+            const value = action.data(key);
+            return value === undefined || value === null || String(value).trim() === ''
+                ? '-'
+                : String(value).trim();
+        };
+        const jobTitle = String(action.data('job-title') || '').trim();
 
-        // Set chat header info
+        emailTo.empty().append($('<option>', {
+            value: '',
+            text: 'Select applicant email'
+        }));
+        emails.forEach(address => {
+            emailTo.append($('<option>', {
+                value: address,
+                text: address
+            }));
+        });
+        emailTo.val('').trigger('change');
+
         $('#emailUserName').text(name);
-        $('#emailUserEmail').text(email);
-        $('#emailTo').val(email);
+        $('#emailUserEmail').text(emails.join(' / ') || 'No email address available');
         $('#emailapplicantId').val(applicantId);
+        $('#emailSaleId').val(action.data('sale-id') || '');
+        const defaultTitle = [jobTitle, senderName].filter(Boolean).join(' - ');
+        $('#emailTitle').val(defaultTitle);
+        $('#emailSubject').val(defaultTitle);
 
-        // Show offcanvas
+        const detailRows = [
+            ['Head Office', rowValue('office-name')],
+            ['Unit/Branch', rowValue('unit-name')],
+            ['Position Type', rowValue('position-type')],
+            ['Benefits', rowValue('benefits')],
+            ['Salary', rowValue('salary')],
+            ['Timings', rowValue('timing')],
+            ['Experience', rowValue('experience')],
+            ['Qualification', rowValue('qualification')],
+            ['Location', rowValue('location')]
+        ].map(([label, value]) => `
+            <tr>
+                <td style="padding:7px 12px;border-bottom:1px solid #e8edf2;color:#566273;font-weight:600;white-space:nowrap;">${escapeHtml(label)}</td>
+                <td style="padding:7px 12px;border-bottom:1px solid #e8edf2;color:#263445;">${renderRichText(value)}</td>
+            </tr>
+        `).join('');
+        const $emailForm = $('#emailForm');
+        const logoUrl = escapeHtml($emailForm.data('logo-url') || '');
+        const imagePath = String($emailForm.attr('data-signature-image') || '').trim();
+        const signatureImageUrl = imagePath
+            ? imagePath.startsWith('uploads/')
+                ? `${window.location.origin}/${imagePath}`
+                : `${window.location.origin}/storage/${imagePath}`
+            : logoUrl;
+        const signatureCompanyName = escapeHtml($emailForm.attr('data-signature-company-name') || 'Kingsbury Personnel');
+        const signaturePhone = escapeHtml($emailForm.attr('data-signature-phone') || '+44 (0) 1494 418312');
+        const signatureEmail = escapeHtml($emailForm.attr('data-signature-email') || '');
+        const body = `
+            <p>Hi ${escapeHtml(name || 'Applicant')},</p>
+            <p>Hope you are doing well. Kindly have a look over the details below and let me know so that we may proceed with sharing your CV for shortlisting.</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:620px;border:1px solid #e8edf2;border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+                <tbody>${detailRows}</tbody>
+            </table>
+            <p style="margin-top:16px;">Kindly reply as soon as possible with <strong>YES</strong> and your interview availability so we can proceed with your CV. I look forward to your confirmation.</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:24px;padding-top:28px;border-top:2px solid #c9a45c;font-family:Arial,sans-serif;">
+                <tbody><tr>
+                    <td style="padding:0 18px 0 0;border-right:1px solid #e8edf2;vertical-align:middle;">
+                        <img src="${escapeHtml(signatureImageUrl)}" alt="${signatureCompanyName}" width="100" style="display:block;width:100px;max-width:100px;height:auto;">
+                    </td>
+                    <td style="padding:0 0 0 18px;vertical-align:middle;">
+                        <p style="margin:0 0 5px;color:#566273;font-size:13px;">Warm regards,</p>
+                        <p style="margin:0;color:#263445;font-size:16px;font-weight:700;">${escapeHtml(senderName)}</p>
+                        <p style="margin:4px 0 0;color:#a27c38;font-size:12px;letter-spacing:1px;text-transform:uppercase;">${signatureCompanyName}</p>
+                        <p style="margin:4px 0 0;color:#a27c38;font-size:12px;letter-spacing:1px;text-transform:uppercase;">Phone: ${signaturePhone}</p>
+                        <p style="margin:4px 0 0;color:#a27c38;font-size:12px;letter-spacing:1px;text-transform:uppercase;">${signatureEmail}</p>
+                    </td>
+                </tr></tbody>
+            </table>
+        `;
+        $('#emailStatus').empty();
+        $('#sendEmailBtn').prop('disabled', false);
+        if ($('#emailBody').next('.note-editor').length) {
+            $('#emailBody').summernote('code', body);
+        } else {
+            $('#emailBody').val(body);
+        }
+
         emailOffcanvas.show();
+    });
+
+    $(document).on('change', '#emailTo', function() {
+        $('#emailUserEmail').text($(this).val() || 'No email address available');
     });
 
     // Function to load messages
@@ -1012,20 +1131,24 @@ document.addEventListener('DOMContentLoaded', function () {
         e.preventDefault();
 
         const applicantId = $('#emailapplicantId').val();
+        const saleId = $('#emailSaleId').val();
         const fromEmail = $('#fromEmail').val().trim();
         const toEmail = $('#emailTo').val().trim();
+        const title = $('#emailTitle').val().trim();
         const subject = $('#emailSubject').val().trim();
         const message = $('#emailBody').summernote('code').trim(); // get HTML content from Summernote
         const csrfToken = $('meta[name="csrf-token"]').attr('content');
 
-        if (fromEmail && toEmail && subject && message && message !== '<p><br></p>') {
+        if (fromEmail && toEmail && title && subject && message && message !== '<p><br></p>') {
             $.ajax({
                 url: "/saveComposedEmail",
                 method: "POST",
                 data: {
                     applicant_id: applicantId,
+                    sale_id: saleId,
                     app_email: toEmail,
                     from_email: fromEmail,
+                    email_title: title,
                     email_subject: subject,
                     email_body: message,
                     _token: csrfToken
@@ -1037,7 +1160,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 success: function(response) {
                     $('#sendEmailBtn').prop('disabled', false);
                     if (response.success) {
-                        $('#emailStatus').html('<span class="text-success">✅ Email sent successfully.</span>');
+                        const successMessage = response.message || 'Email queued successfully.';
+                        $('#emailStatus').html(`<span class="text-success">${successMessage}</span>`);
+                        toastr.success(successMessage);
+                        $('#emailTitle').val('');
                         $('#emailSubject').val('');
                         $('#emailBody').summernote('reset'); // clear Summernote editor
                         setTimeout(() => {
@@ -1071,8 +1197,27 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     $('#emailOffcanvas').on('shown.bs.offcanvas', function () {
-        $('.summernote').summernote({
-            height: 250
+        const editor = $('#emailBody');
+        if (editor.next('.note-editor').length) {
+            return;
+        }
+
+        if (typeof $.fn.summernote !== 'function') {
+            console.error('Summernote is required to edit email content.');
+            return;
+        }
+
+        editor.summernote({
+            height: 250,
+            toolbar: [
+                ['style', ['bold', 'italic', 'underline', 'clear']],
+                ['font', ['strikethrough', 'superscript', 'subscript']],
+                ['fontsize', ['fontsize']],
+                ['color', []],
+                ['para', ['ul', 'ol', 'paragraph']],
+                ['insert', ['link']],
+                ['view', ['codeview']]
+            ]
         });
     });
 

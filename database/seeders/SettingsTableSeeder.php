@@ -68,21 +68,56 @@ class SettingsTableSeeder extends Seeder
                 'type'  => 'string',
                 'group' => 'sms',
             ],
+            [
+                'key'   => 'primary_email_address',
+                'value' => '',
+                'type'  => 'email',
+                'group' => 'email',
+            ],
+            [
+                'key'   => 'email_signature_image',
+                'value' => '',
+                'type'  => 'string',
+                'group' => 'signature',
+            ],
+            [
+                'key'   => 'email_signature_company_name',
+                'value' => '',
+                'type'  => 'string',
+                'group' => 'signature',
+            ],
+            [
+                'key'   => 'email_signature_phone',
+                'value' => '',
+                'type'  => 'string',
+                'group' => 'signature',
+            ],
+            [
+                'key'   => 'email_signature_email',
+                'value' => '',
+                'type'  => 'email',
+                'group' => 'signature',
+            ],
+            [
+                'key'   => 'email_signature_address',
+                'value' => '',
+                'type'  => 'string',
+                'group' => 'signature',
+            ],
             
         ];
 
         foreach ($settings as $setting) {
-            // Only missing keys: a re-seed must never wipe a real API key or URL.
-            if (!DB::table('settings')->where('key', $setting['key'])->exists()) {
-                DB::table('settings')->insert([
-                    'key' => $setting['key'],
-                    'value' => $setting['value'],
-                    'type'  => $setting['type'],
-                    'group' => $setting['group'],
-                    'updated_at' => now(),
-                    'created_at' => now(),
-                ]);
-            }
+            // Only missing keys: a re-seed must never wipe a real API key, URL,
+            // email signature or primary email address.
+            DB::table('settings')->insertOrIgnore([
+                'key'        => $setting['key'],
+                'value'      => $setting['value'],
+                'type'       => $setting['type'],
+                'group'      => $setting['group'],
+                'updated_at' => now(),
+                'created_at' => now(),
+            ]);
         }
     }
 }

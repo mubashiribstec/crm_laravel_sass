@@ -75,3 +75,8 @@
 @import "pages/authentication";
 @import "pages/pricing";
 @import "pages/timeline";
+
+tr.blacklisted-row > td:first-child {
+    box-shadow: inset 4px 0 0 var(--bs-danger),
+        inset 0 0 0 9999px var(--bs-table-bg-state, var(--bs-table-bg-type, var(--bs-table-accent-bg)));
+}

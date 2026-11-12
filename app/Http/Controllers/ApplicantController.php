@@ -13,6 +13,7 @@ use Horsefly\Office;
 use Horsefly\Unit;
 use Horsefly\User;
 use Horsefly\Applicant;
+use Horsefly\ApplicantsSynopsisForm;
 use Horsefly\ApplicantNote;
 use Horsefly\ModuleNote;
 use Horsefly\EmailTemplate;
@@ -53,10 +54,14 @@ use Illuminate\Validation\Rule;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\URL;
 use Yajra\DataTables\Facades\DataTables;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Support\Str;
+use PhpOffice\PhpWord\IOFactory;
+use PhpOffice\PhpWord\PhpWord;
+use PhpOffice\PhpWord\Settings as PhpWordSettings;
 
 class ApplicantController extends Controller
 {
@@ -76,7 +81,13 @@ class ApplicantController extends Controller
         $this->middleware('permission:applicant-add-note')->only(['storeShortNotes', 'markApplicantNoNursingHome']);
         $this->middleware('permission:applicant-view-note')->only(['getApplicanCallbackNotes', 'getApplicantNoNursingHomeNotes']);
         $this->middleware('permission:applicant-view-history')->only(['history', 'getApplicantHistoryAjaxRequest']);
-        $this->middleware('permission:applicant-view,resource-direct-index')->only(['sendCVtoQuality']);
+        $this->middleware('permission:applicant-view,resource-direct-index')->only([
+            'sendCVtoQuality',
+            'saveSendCvHangupNote',
+            'downloadCvQuestionnaire',
+            'autoDownloadApplicantDraftFile',
+        ]);
+        $this->middleware('permission:applicant-show-synopsis-forms')->only(['downloadApplicantDraftFile']);
     }
 
     /**
@@ -654,51 +665,6 @@ class ApplicantController extends Controller
             $model->orderBy('applicants.created_at', 'desc');
         }
 
-        // if ($request->filled('search.value')) {
-        //     $searchTerm  = trim($request->input('search.value'));
-        //     $cleanDigits = preg_replace('/[^0-9]/', '', $searchTerm);
-        //     $isDigitOnly = !empty($cleanDigits) && strlen($cleanDigits) === strlen($searchTerm);
-
-        //     if (strlen($searchTerm) >= 2) {
-        //         $firstWord = explode(' ', $searchTerm)[0];
-
-        //         // Check for exact applicant_name match
-        //         $exactNameCount = Applicant::where('applicant_name', $searchTerm)->count();
-
-        //         if ($exactNameCount > 0) {
-        //             // If exact match exists, filter only for those
-        //             $model->where('applicants.applicant_name', $searchTerm);
-        //         } else {
-        //             // Proceed with existing closest match logic
-
-        //             // Check if the search term looks like a postcode
-        //             if (preg_match('/^[A-Za-z]{1,2}[0-9]{1,2}/i', $searchTerm)) {
-        //                 $model->where(function ($q) use ($searchTerm) {
-        //                     $q->whereRaw('UPPER(applicants.applicant_postcode) LIKE ?', [strtoupper($searchTerm) . '%']);
-        //                 });
-        //             } else {
-        //                 // Search for name or email variants
-        //                 $model->where(function ($q) use ($firstWord) {
-        //                     $q->where('applicants.applicant_name', 'LIKE', $firstWord . '%')
-        //                         ->orWhere('applicants.applicant_email', 'LIKE', $firstWord . '%')
-        //                         ->orWhere('applicants.applicant_email_secondary', 'LIKE', $firstWord . '%')
-        //                         ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_phone, " ", ""), "-", "") LIKE ?', [$firstWord . '%'])
-        //                         ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_phone_secondary, " ", ""), "-", "") LIKE ?', [$firstWord . '%'])
-        //                         ->orWhereRaw('REPLACE(REPLACE(applicants.applicant_landline, " ", ""), "-", "") LIKE ?', [$firstWord . '%'])
-        //                         ->orWhere('applicants.applicant_notes', 'LIKE', '%' . $firstWord . '%');
-
-        //                     // Relationship search — only if 3+ chars
-        //                     if (strlen($firstWord) >= 3) {
-        //                         $q->orWhereHas('jobTitle', fn($q) => $q->where('name', 'LIKE', $firstWord . '%'))
-        //                             ->orWhereHas('jobCategory', fn($q) => $q->where('name', 'LIKE', $firstWord . '%'))
-        //                             ->orWhereHas('jobSource', fn($q) => $q->where('name', 'LIKE', $firstWord . '%'));
-        //                     }
-        //                 });
-        //             }
-        //         }
-        //     }
-        // }
-
         if ($request->filled('search.value')) {
             $searchTerm = trim($request->input('search.value'));
             $cleanDigits = preg_replace('/[^0-9]/', '', $searchTerm);
@@ -770,7 +736,6 @@ class ApplicantController extends Controller
                 }
             }
         }
-
 
         if ($request->ajax()) {
             return DataTables::eloquent($model)
@@ -2296,18 +2261,153 @@ class ApplicantController extends Controller
     //             </div>';
     // }
 
+    public function saveSendCvHangupNote(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'applicant_id' => 'required|integer|exists:applicants,id',
+            'details' => 'nullable|string|max:5000',
+            'hangup_call' => 'nullable|boolean',
+            'no_job' => 'nullable|boolean',
+            'transport_type' => 'nullable|array',
+            'transport_type.*' => 'string|in:By Walk,Cycle,Car,Public Transport',
+            'shift_pattern' => 'nullable|array',
+            'shift_pattern.*' => 'string|in:Day,Night,Full Time,Part Time,24 hours,Day/Night',
+            'interview_option_1' => 'nullable|date_format:Y-m-d\TH:i',
+            'interview_option_2' => 'nullable|date_format:Y-m-d\TH:i',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors(),
+                'message' => 'Please provide valid applicant note details.',
+            ], 422);
+        }
+
+        $validated = $validator->validated();
+        $isHangup = $request->boolean('hangup_call');
+        $isNoJob = $request->boolean('no_job');
+        if ($isHangup === $isNoJob) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Select either Call Hung up/Not Interested or No Job.',
+            ], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $user = Auth::user();
+            $applicant = Applicant::findOrFail($validated['applicant_id']);
+            $questionnaire = $this->buildSendCvShortcutQuestionnaire($request);
+            $statusQuestion = $isHangup ? 'Call Hung up/Not Interested' : 'No Job';
+            $questionnaire = [$statusQuestion => 'Yes'] + $questionnaire;
+            $applicantNotes = $this->formatSendCvQuestionnaireNote($questionnaire) .
+                '<strong>By:</strong> ' . e($user->name) . ' Date: ' . now()->format('d-m-Y');
+
+            $applicant->update([
+                'applicant_notes' => $applicantNotes,
+                'is_temp_not_interested' => $isHangup,
+                'is_no_response' => false,
+                'is_callback_enable' => false,
+                'is_circuit_busy' => false,
+                'is_blocked' => false,
+                'is_no_job' => $isNoJob,
+            ]);
+
+            $applicantNote = ApplicantNote::create([
+                'details' => $applicantNotes,
+                'applicant_id' => $applicant->id,
+                'moved_tab_to' => $isHangup ? 'not interested' : 'no job',
+                'user_id' => $user->id,
+            ]);
+            $applicantNote->update(['note_uid' => md5($applicantNote->id)]);
+
+            ModuleNote::where([
+                'module_noteable_id' => $applicant->id,
+                'module_noteable_type' => 'Horsefly\Applicant',
+                'status' => 1,
+            ])->update(['status' => 0]);
+
+            $moduleNote = ModuleNote::create([
+                'details' => $applicantNotes,
+                'module_noteable_id' => $applicant->id,
+                'module_noteable_type' => 'Horsefly\Applicant',
+                'user_id' => $user->id,
+            ]);
+            $moduleNote->update(['module_note_uid' => md5($moduleNote->id)]);
+
+            $observer = new ActionObserver();
+            $observer->customApplicantAudit($applicant, 'applicant_notes');
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Applicant notes updated successfully.',
+            ]);
+        } catch (Exception $e) {
+            DB::rollBack();
+            Log::error('Failed to save Send CV shortcut applicant note', [
+                'applicant_id' => $validated['applicant_id'],
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Unable to update applicant notes.',
+            ], 500);
+        }
+    }
+
     public function sendCVtoQuality(Request $request)
     {
         try {
             $input = $request->all();
             $request->replace($input);
 
+            if ($request->boolean('hangup_call') || $request->boolean('no_job')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Hang-up and No Job submissions must be saved as applicant notes.',
+                ], 422);
+            }
+
             $user = Auth::user();
+            $questionnaireDocumentPath = null;
+            $autoDownloadUrl = null;
+            $requiredForRegularSubmission = fn () => Rule::requiredIf(
+                fn () => !$request->boolean('hangup_call') && !$request->boolean('no_job')
+            );
 
             $validator = Validator::make($request->all(), [
                 'applicant_id' => "required|integer|exists:applicants,id",
                 'sale_id' => "required|integer|exists:sales,id",
-                'details' => "required",
+                'details' => [$requiredForRegularSubmission(), 'nullable', 'string', 'max:5000'],
+                'hangup_call' => 'nullable|boolean',
+                'no_job' => 'nullable|boolean',
+                'nmc_pin_status' => 'nullable|string|max:2000',
+                'notice_period' => 'nullable|string|max:2000',
+                'clinical_skills' => 'nullable|array',
+                'clinical_skills.*' => 'string|in:Wound Care,Catheterization,Venepuncture,PEG Feeding,Tracheostomy Care,Suctioning,Dementia Care,Palliative Care',
+                'category' => 'nullable|string|in:Nurse,Non Nurse,Nursery',
+                'dbs_convictions' => 'nullable|string|max:2000',
+                'expected_hourly_rate' => 'nullable|string|max:2000',
+                'holidays_booked' => 'nullable|string|max:2000',
+                'reasons_for_job_change' => 'nullable|string|max:2000',
+                'nursing_experience_years' => 'nullable|string|max:2000',
+                'nursing_home_experience' => 'nullable|string|max:2000',
+                'manager_rota' => 'nullable|string|max:2000',
+                'current_dbs_status' => 'nullable|string|max:2000',
+                'expected_salary' => 'nullable|string|max:2000',
+                'qualification' => 'nullable|string|max:2000',
+                'transport_type' => 'nullable|array',
+                'transport_type.*' => 'string|in:By Walk,Cycle,Car,Public Transport',
+                'shift_pattern' => 'nullable|array',
+                'shift_pattern.*' => 'string|in:Day,Night,Full Time,Part Time,24 hours,Day/Night',
+                'visa_status' => [$requiredForRegularSubmission(), 'nullable', 'string', 'max:2000'],
+                'interview_option_1' => [$requiredForRegularSubmission(), 'nullable', 'date_format:Y-m-d\TH:i'],
+                'interview_option_2' => [$requiredForRegularSubmission(), 'nullable', 'date_format:Y-m-d\TH:i'],
             ]);
 
             if ($validator->fails()) {
@@ -2322,7 +2422,8 @@ class ApplicantController extends Controller
             DB::beginTransaction();
 
             try {
-                $details = $request->input('details');
+                $details = $request->input('details', '');
+                $questionnaire = $this->buildSendCvQuestionnaire($request);
 
                 $applicant = Applicant::findOrFail($request->input('applicant_id'));
                 $sale = Sale::findOrFail($request->input('sale_id'));
@@ -2373,6 +2474,7 @@ class ApplicantController extends Controller
                 } else {
                     $noteDetail .= $this->handleRegularSubmission($request, $user);
                 }
+                $noteDetail .= $this->formatSendCvQuestionnaireNote($questionnaire);
 
                 // ✅ Check CV limits
                 $sent_cv_count = CVNote::where([
@@ -2411,7 +2513,31 @@ class ApplicantController extends Controller
                     'details' => $noteDetail,
                 ]);
 
-                $cv_note->update(['cv_uid' => md5($cv_note->id)]);
+                $cvNoteDetails = $noteDetail;
+                if (!$request->boolean('hangup_call') && !$request->boolean('no_job')) {
+                    $questionnaireDocumentPath = $this->createCvQuestionnaireDocument(
+                        $questionnaire,
+                        $applicant,
+                        $sale
+                    );
+                    $synopsisForm = $applicant->synopsisForms()->create([
+                        'sale_id' => $sale->id,
+                        'file_url' => $questionnaireDocumentPath,
+                    ]);
+                    $downloadUrl = route('applicants.draft-file.download', $synopsisForm->id);
+                    $cvNoteDetails .= '<strong>Word questionnaire:</strong> <a href="' .
+                        e($downloadUrl) . '">Download the questionnaire</a><br>';
+                    $autoDownloadUrl = URL::temporarySignedRoute(
+                        'applicants.draft-file.auto-download',
+                        now()->addMinutes(10),
+                        ['synopsisForm' => $synopsisForm->id]
+                    );
+                }
+
+                $cv_note->update([
+                    'cv_uid' => md5($cv_note->id),
+                    'details' => $cvNoteDetails,
+                ]);
 
                 // History::where('applicant_id', $applicant->id)->update(['status' => 0]);
 
@@ -2430,7 +2556,8 @@ class ApplicantController extends Controller
 
                 return response()->json([
                     'success' => true,
-                    'message' => 'CV successfully sent to quality.'
+                    'message' => 'CV successfully sent to quality.',
+                    'download_url' => $autoDownloadUrl,
                 ]);
             } catch (ActionRefusedException $e) {
                 // A rule refused it (sale closed, on hold, titles don't match…): say why, always.
@@ -2441,6 +2568,9 @@ class ApplicantController extends Controller
                 // ❌ Rollback the transaction if something fails inside (Throwable: a PHP Error too,
                 // so the transaction is never left open)
                 DB::rollBack();
+                if ($questionnaireDocumentPath) {
+                    File::delete(public_path($questionnaireDocumentPath));
+                }
 
                 Log::error('Transaction failed in sendCVtoQuality', [
                     'error' => $e->getMessage(),
@@ -2486,12 +2616,324 @@ class ApplicantController extends Controller
         }
     }
 
+    public function downloadCvQuestionnaire(int $cvNoteId): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $cvNote = CVNote::query()->findOrFail($cvNoteId);
+        $documentPath = 'cv-questionnaires/' . $cvNote->getKey() . '.docx';
+        $storage = Storage::disk('local');
+
+        abort_unless($storage->exists($documentPath), 404, 'The questionnaire document was not found.');
+
+        return $storage->download(
+            $documentPath,
+            'CV-Questionnaire-' . $cvNote->applicant_id . '-' . $cvNote->sale_id . '.docx',
+            [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'Cache-Control' => 'private, no-store',
+            ]
+        );
+    }
+
+    public function downloadApplicantDraftFile(ApplicantsSynopsisForm $synopsisForm): \Symfony\Component\HttpFoundation\BinaryFileResponse
+    {
+        $relativePath = $synopsisForm->file_url;
+        $allowedDirectories = [
+            'uploads/synopsisForms' => public_path('uploads/synopsisForms'),
+            'uploads/drafts' => public_path('uploads/drafts'),
+        ];
+        $draftDirectory = null;
+        foreach ($allowedDirectories as $relativeDirectory => $absoluteDirectory) {
+            if (is_string($relativePath) && str_starts_with($relativePath, $relativeDirectory . '/')) {
+                $draftDirectory = realpath($absoluteDirectory);
+                break;
+            }
+        }
+
+        abort_unless(
+            $draftDirectory !== false && $draftDirectory !== null,
+            404,
+            'The synopsis form was not found.'
+        );
+
+        $filePath = realpath(public_path($relativePath));
+        abort_unless(
+                $filePath !== false &&
+                str_starts_with(
+                    strtolower($filePath),
+                    strtolower($draftDirectory . DIRECTORY_SEPARATOR)
+                ) &&
+                is_file($filePath),
+            404,
+            'The synopsis form was not found.'
+        );
+
+        return response()->download(
+            $filePath,
+            basename($filePath),
+            ['Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+        );
+    }
+
+    /**
+     * The automatic download straight after Send CV. The short-lived signed link lets the sender
+     * download their own form without the applicant-show-synopsis-forms permission.
+     */
+    public function autoDownloadApplicantDraftFile(ApplicantsSynopsisForm $synopsisForm): \Symfony\Component\HttpFoundation\BinaryFileResponse
+    {
+        return $this->downloadApplicantDraftFile($synopsisForm);
+    }
+
+    private function buildSendCvQuestionnaire(Request $request): array
+    {
+        $answer = static function ($value): string {
+            if (is_array($value)) {
+                $value = implode(', ', array_map('trim', $value));
+            }
+
+            $value = trim((string) $value);
+
+            return $value === '' ? 'Not provided' : $value;
+        };
+
+        $interviewOption = static function (string $field) use ($request): string {
+            if ($request->boolean('hangup_call') || $request->boolean('no_job')) {
+                return 'Not applicable';
+            }
+
+            return Carbon::createFromFormat(
+                'Y-m-d\TH:i',
+                (string) $request->input($field)
+            )->format('d M Y, H:i');
+        };
+        $category = $request->input('category');
+        $isNonNurse = $category === 'Non Nurse';
+        $isNursery = $category === 'Nursery';
+        $hideNurseQuestions = $isNonNurse || $isNursery;
+        $yearsOfExperienceLabel = $isNursery
+            ? '13. Years of Experience as a Nursery'
+            : ($isNonNurse
+                ? '13. Years of Experience as a Carer, care assistant or support worker'
+                : '13. Years of Experience as a Nurse');
+        $careExperienceLabel = $isNursery
+            ? '14. Years of Experience as a nursery day care center'
+            : ($isNonNurse
+                ? '14. Years of Experience as a Carer, care assistant or support worker'
+                : '14. Years of Experience as a Nurse in Nursing Home');
+
+        $questionnaire = [
+            '1. Transport Type' => $answer($request->input('transport_type', [])),
+            '2. Shift Pattern' => $answer($request->input('shift_pattern', [])),
+            '3. Interview Availability Same Week' => $interviewOption('interview_option_1'),
+            '4. Interview Availability Next Week' => $interviewOption('interview_option_2'),
+            'Category' => $answer($request->input('category')),
+            '5. NMC PIN Status' => $hideNurseQuestions ? 'Not applicable' : $answer($request->input('nmc_pin_status')),
+            '6. Notice Period' => $answer($request->input('notice_period')),
+            '7. Clinical Skills' => $hideNurseQuestions ? 'Not applicable' : $answer($request->input('clinical_skills', [])),
+            '8. Visa Status' => $answer($request->input('visa_status')),
+            '9. Convictions on DBS' => $answer($request->input('dbs_convictions')),
+            '10. Expected Hourly Rate' => $answer($request->input('expected_hourly_rate')),
+            '11. Holidays Booked' => $answer($request->input('holidays_booked')),
+            '12. Reasons for Job Change' => $answer($request->input('reasons_for_job_change')),
+            $yearsOfExperienceLabel => $answer($request->input('nursing_experience_years')),
+            $careExperienceLabel => $answer($request->input('nursing_home_experience')),
+            '15. Working According to the Manager\'s Rota' => $answer($request->input('manager_rota')),
+            '16. Current DBS Status' => $answer($request->input('current_dbs_status')),
+            '17. Expected Salary' => $answer($request->input('expected_salary')),
+            '18. Qualification' => $answer($request->input('qualification')),
+            '21. No Job' => $request->boolean('no_job') ? 'Yes' : 'No',
+            '22. Call Hung up/Not Interested' => $request->boolean('hangup_call') ? 'Yes' : 'No',
+            'Other Details' => $answer($request->input('details')),
+        ];
+
+        if ($hideNurseQuestions) {
+            unset($questionnaire['5. NMC PIN Status'], $questionnaire['7. Clinical Skills']);
+
+            $renumberedQuestionnaire = [];
+            $questionNumber = 5;
+            foreach ($questionnaire as $label => $value) {
+                if (
+                    preg_match('/^(\d+)\.\s/', $label, $matches)
+                    && (int) $matches[1] >= 5
+                    && (int) $matches[1] <= 18
+                ) {
+                    $label = preg_replace('/^\d+\./', $questionNumber++ . '.', $label);
+                }
+
+                $renumberedQuestionnaire[$label] = $value;
+            }
+
+            return $renumberedQuestionnaire;
+        }
+
+        return $questionnaire;
+    }
+
+    private function buildSendCvShortcutQuestionnaire(Request $request): array
+    {
+        $questionnaire = [];
+        foreach ([
+            'transport_type' => '1. Transport Type',
+            'shift_pattern' => '2. Shift Pattern',
+        ] as $field => $question) {
+            $values = $request->input($field, []);
+            if (is_array($values) && $values !== []) {
+                $questionnaire[$question] = implode(', ', array_map('trim', $values));
+            }
+        }
+
+        foreach ([
+            'interview_option_1' => '3. Interview Availability Same Week',
+            'interview_option_2' => '4. Interview Availability Next Week',
+        ] as $field => $question) {
+            $value = trim((string) $request->input($field, ''));
+            if ($value !== '') {
+                $questionnaire[$question] = Carbon::createFromFormat(
+                    'Y-m-d\TH:i',
+                    $value
+                )->format('d M Y, H:i');
+            }
+        }
+
+        $details = trim((string) $request->input('details', ''));
+        if ($details !== '') {
+            $questionnaire['Other Details'] = $details;
+        }
+
+        return $questionnaire;
+    }
+
+    private function formatSendCvQuestionnaireNote(array $questionnaire): string
+    {
+        $note = '<strong>Applicant CV Questionnaire:</strong><br>';
+
+        foreach ($questionnaire as $question => $answer) {
+            $note .= '<strong>' . e($question) . ':</strong> ' .
+                nl2br(e($answer), false) . '<br>';
+        }
+
+        return $note;
+    }
+
+    private function createCvQuestionnaireDocument(
+        array $questionnaire,
+        Applicant $applicant,
+        Sale $sale
+    ): string {
+        $logoPath = public_path('images/Kingsbury-Personnel-Logo.png');
+        if (!is_file($logoPath)) {
+            throw new \RuntimeException('The company logo required for the questionnaire document was not found.');
+        }
+
+        // Without this, an answer containing & or < produces a file Word can't open.
+        PhpWordSettings::setOutputEscapingEnabled(true);
+
+        $word = new PhpWord();
+        $word->setDefaultFontName('Arial');
+        $word->setDefaultFontSize(10);
+
+        $section = $word->addSection();
+        $section->addImage($logoPath, [
+            'width' => 135,
+            'alignment' => 'center',
+        ]);
+        $section->addText(mb_strtoupper($applicant->applicant_name), [
+            'bold' => true,
+            'size' => 14,
+            'color' => '1F3A5F',
+        ], [
+            'alignment' => 'center',
+            'spaceAfter' => 120,
+        ]);
+        $section->addText('Synopsis Form and CV', [
+            'bold' => true,
+            'size' => 20,
+            'color' => '1F3A5F',
+        ], [
+            'alignment' => 'center',
+            'spaceAfter' => 180,
+        ]);
+        $section->addTextBreak();
+
+        $table = $section->addTable([
+            'borderSize' => 6,
+            'borderColor' => 'B7C4D1',
+            'cellMargin' => 100,
+            'width' => 100 * 50,
+            'unit' => 'pct',
+        ]);
+        $table->addRow();
+        $table->addCell(3000, ['bgColor' => 'E8EEF5'])->addText('Question', [
+            'bold' => true,
+            'color' => '1F3A5F',
+        ]);
+        $table->addCell(5800, ['bgColor' => 'E8EEF5'])->addText('Answer', [
+            'bold' => true,
+            'color' => '1F3A5F',
+        ]);
+
+        foreach ($questionnaire as $question => $answer) {
+            if (in_array($question, [
+                '21. No Job',
+                '22. Call Hung up/Not Interested',
+                'Other Details',
+            ], true)) {
+                continue;
+            }
+
+            $table->addRow();
+            $table->addCell(3000, ['valign' => 'top'])->addText($question, ['bold' => true]);
+            $answerCell = $table->addCell(5800, ['valign' => 'top']);
+            $lines = preg_split('/\r\n|\r|\n/', $answer) ?: [''];
+            $answerCell->addText(array_shift($lines) ?? '');
+            foreach ($lines as $line) {
+                $answerCell->addTextBreak();
+                $answerCell->addText($line);
+            }
+        }
+
+        $applicantName = trim((string) $applicant->applicant_name);
+        $applicantName = $applicantName === '' ? 'applicant-' . $applicant->id : ucwords(strtolower($applicantName));
+        $generatedAt = Carbon::now();
+        $applicantFileName = Str::slug($applicantName) ?: 'applicant-' . $applicant->id;
+        $documentPath = implode('/', [
+            'uploads',
+            'synopsisForms',
+            $generatedAt->format('Y'),
+            $generatedAt->format('m'),
+            $generatedAt->format('d'),
+            $applicantFileName . '_' . $generatedAt->format('Ymd_His_u') . '.docx',
+        ]);
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'cv-questionnaire-');
+        if ($temporaryPath === false) {
+            throw new \RuntimeException('Unable to prepare the questionnaire Word document.');
+        }
+
+        try {
+            IOFactory::createWriter($word, 'Word2007')->save($temporaryPath);
+            $documentContents = file_get_contents($temporaryPath);
+            if ($documentContents === false) {
+                throw new \RuntimeException('Unable to save the questionnaire Word document.');
+            }
+
+            $fullDocumentPath = public_path($documentPath);
+            File::ensureDirectoryExists(dirname($fullDocumentPath));
+            if (File::put($fullDocumentPath, $documentContents) === false) {
+                throw new \RuntimeException('Unable to save the questionnaire Word document.');
+            }
+        } finally {
+            if (is_file($temporaryPath)) {
+                unlink($temporaryPath);
+            }
+        }
+
+        return $documentPath;
+    }
+
     // Helper methods
     private function handleHangupCall(Request $request, User $user, Applicant $applicant, Sale $sale, $notes)
     {
         $noteDetail = '<strong>Date:</strong> ' . Carbon::now()->format('d-m-Y') . '<br>';
         $noteDetail .= '<strong>Call Hung up/Not Interested:</strong> Yes<br>';
-        $noteDetail .= '<strong>Details:</strong> ' . nl2br(htmlspecialchars($request->input('details'))) . '<br>';
         $noteDetail .= '<strong>By:</strong> ' . $user->name  . ' Date: ' . now()->format('d-m-Y') . '<br>';
 
         $applicant->update([
@@ -2508,7 +2950,7 @@ class ApplicantController extends Controller
 
         $notes_for_range = NotesForRangeApplicant::create([
             'applicants_pivot_sales_id' => $pivotSale->id,
-            'reason' => $notes,
+            'reason' => trim((string) $notes) !== '' ? $notes : 'Call Hung up/Not Interested',
             'range_uid' => null
         ]);
         $notes_for_range->update(['range_uid' => $notes_for_range->id]);
@@ -2520,7 +2962,6 @@ class ApplicantController extends Controller
     {
         $noteDetail = '<strong>Date:</strong> ' . Carbon::now()->format('d-m-Y') . '<br>';
         $noteDetail .= '<strong>No Job:</strong> Yes<br>';
-        $noteDetail .= '<strong>Details:</strong> ' . nl2br(htmlspecialchars($request->input('details'))) . '<br>';
         $noteDetail .= '<strong>By:</strong> ' . $user->name . '<br>';
 
         $applicant->update([
@@ -2537,21 +2978,7 @@ class ApplicantController extends Controller
     }
     private function handleRegularSubmission($request, $user)
     {
-        $transportType = $request->has('transport_type') ? implode(', ', $request->input('transport_type')) : '';
-        $shiftPattern = $request->has('shift_pattern') ? implode(', ', $request->input('shift_pattern')) : '';
-
         $noteDetail = '<strong>Date:</strong> ' . Carbon::now()->format('d-m-Y') . '<br>';
-        $noteDetail .= '<strong>Current Employer Name:</strong> ' . htmlspecialchars($request->input('current_employer_name')) . '<br>';
-        $noteDetail .= '<strong>PostCode:</strong> ' . htmlspecialchars($request->input('postcode')) . '<br>';
-        $noteDetail .= '<strong>Current/Expected Salary:</strong> ' . htmlspecialchars($request->input('expected_salary')) . '<br>';
-        $noteDetail .= '<strong>Qualification:</strong> ' . htmlspecialchars($request->input('qualification')) . '<br>';
-        $noteDetail .= '<strong>Transport Type:</strong> ' . htmlspecialchars($transportType) . '<br>';
-        $noteDetail .= '<strong>Shift Pattern:</strong> ' . htmlspecialchars($shiftPattern) . '<br>';
-        $noteDetail .= '<strong>Nursing Home:</strong> ' . ($request->boolean('nursing_home') ? 'Yes' : 'No') . '<br>';
-        $noteDetail .= '<strong>Alternate Weekend:</strong> ' . ($request->boolean('alternate_weekend') ? 'Yes' : 'No') . '<br>';
-        $noteDetail .= '<strong>Interview Availability:</strong> ' . ($request->boolean('interview_availability') ? 'Available' : 'Not Available') . '<br>';
-        $noteDetail .= '<strong>No Job:</strong> ' . ($request->boolean('no_job') ? 'Yes' : 'No') . '<br>';
-        $noteDetail .= '<strong>Details:</strong> ' . nl2br(htmlspecialchars($request->input('details'))) . '<br>';
         $noteDetail .= '<strong>By:</strong> ' . $user->name . ' Date: ' . now()->format('d-m-Y') . '<br>';
 
         return $noteDetail;

@@ -876,6 +876,7 @@ class SalesExport implements FromCollection, WithHeadings
                 if (str_contains($range, '|')) {
                     [$start, $end] = explode('|', $range, 2);
                     $between(trim($start) . ' 00:00:00', trim($end) . ' 23:59:59');
+                    break; // A picked range replaces the period dropdown and its 3-month default.
                 }
 
                 switch ($this->filters['date_flock_filter'] ?? '') {
@@ -1043,20 +1044,27 @@ class SalesExport implements FromCollection, WithHeadings
                     $query->where('sales.is_blacklist', 1);
                     break;
                 case 'closed':
-                    $query->where('sales.status', 0)->where('sales.is_blacklist', 0)->where('sales.is_on_hold', 0);
+                    $query->where('sales.status', 0)
+                        ->where('sales.is_blacklist', 0)
+                        ->where('sales.is_on_hold', 0);
                     break;
                 case 'pending':
-                    $query->where('sales.status', 2)->where('sales.is_blacklist', 0);
+                    $query->where('sales.status', 2)
+                        ->where('sales.is_blacklist', 0);
                     break;
                 case 'rejected':
-                    $query->where('sales.status', 3)->where('sales.is_blacklist', 0);
+                    $query->where('sales.status', 3)
+                        ->where('sales.is_blacklist', 0);
                     break;
                 case 'on hold':
-                    $query->where('sales.is_on_hold', true)->where('sales.is_blacklist', 0);
+                    $query->where('sales.is_on_hold', true)
+                        ->where('sales.is_blacklist', 0);
                     break;
                 case 'open':
                 default:
-                    $query->where('sales.status', 1)->where('sales.is_blacklist', 0)->where('sales.is_on_hold', 0);
+                    $query->where('sales.status', 1)
+                        ->where('sales.is_blacklist', 0)
+                        ->where('sales.is_on_hold', 0);
                     break;
             }
         }
@@ -1089,6 +1097,11 @@ class SalesExport implements FromCollection, WithHeadings
         $userIds = $this->arrayFilter($this->filters['user_filter'] ?? null);
         if ($userIds !== []) {
             $query->whereIn('sales.user_id', $userIds);
+        }
+
+        // "Blacklisted only" checkbox on the sales pages
+        if (!empty($this->filters['blacklist_filter'])) {
+            $query->where('sales.is_blacklist', 1);
         }
 
         $limitCountFilter = strtolower(trim((string) ($this->filters['cv_limit_filter'] ?? '')));

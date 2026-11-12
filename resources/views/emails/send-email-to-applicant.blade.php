@@ -36,6 +36,9 @@
                         <div class="mb-3">
                             {{-- <div id="snow-editor" style="height: 400px;">{!! $formattedMessage !!}</div> --}}
                             {{-- <input type="hidden" name="body" id="emailBody" value=""> --}}
+                            <div class="alert alert-info" role="alert">
+                                Please do not add your signature to the email body. Your email signature is added automatically.
+                            </div>
                             <textarea name="body" id="emailBody" class="summernote form-control @error('body') is-invalid @enderror">{!! $formattedMessage !!}</textarea>
                             <div class="invalid-feedback">Please provide email body</div>
                         </div>

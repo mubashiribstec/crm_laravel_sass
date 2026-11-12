@@ -103,6 +103,13 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
         Route::post('update', [ApplicantController::class, 'update'])->name('applicants.update');
         Route::post('uploadCv', [ApplicantController::class, 'uploadCv'])->name('applicants.uploadCv');
         Route::post('crmuploadCv', [ApplicantController::class, 'crmuploadCv'])->name('applicants.crmuploadCv');
+        Route::get('draft-files/{synopsisForm}/download', [ApplicantController::class, 'downloadApplicantDraftFile'])
+            ->whereNumber('synopsisForm')
+            ->name('applicants.draft-file.download');
+        Route::get('draft-files/{synopsisForm}/auto-download', [ApplicantController::class, 'autoDownloadApplicantDraftFile'])
+            ->whereNumber('synopsisForm')
+            ->middleware('signed')
+            ->name('applicants.draft-file.auto-download');
         Route::get('{id}/history', [ApplicantController::class, 'history'])->name('applicants.history');
         // CVs are not public files: this checks the login, the permission and the blocked rule.
         Route::get('{id}/cv/{kind}', [ApplicantCvController::class, 'download'])
@@ -119,6 +126,9 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     Route::post('storeShortNotes', [ApplicantController::class, 'storeShortNotes'])->name('storeShortNotes');
     Route::post('markApplicantNoNursingHome', [ApplicantController::class, 'markApplicantNoNursingHome'])->name('markApplicantNoNursingHome');
     Route::post('sendCVtoQuality', [ApplicantController::class, 'sendCVtoQuality'])->name('sendCVtoQuality');
+    Route::post('saveSendCvHangupNote', [ApplicantController::class, 'saveSendCvHangupNote'])->name('saveSendCvHangupNote');
+    Route::get('applicants/cv-questionnaire/{cvNoteId}/download', [ApplicantController::class, 'downloadCvQuestionnaire'])
+        ->name('applicants.cv-questionnaire.download');
     Route::get('getApplicantHistoryAjaxRequest', [ApplicantController::class, 'getApplicantHistoryAjaxRequest'])
         ->name('getApplicantHistoryAjaxRequest');
     Route::get('getApplicantNoNursingHomeNotes', [ApplicantController::class, 'getApplicantNoNursingHomeNotes'])
@@ -335,11 +345,12 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     Route::put('job-sources/update', [SettingController::class, 'jobSourceUpdate'])->name('job-sources.update');
 
     /**Email Templates */
-    Route::post('settings/email-templates', [SettingController::class, 'emailTemplatesIndex'])->name('settings.email-templates');
+    Route::get('settings/email-templates', [SettingController::class, 'emailTemplatesIndex'])->name('settings.email-templates');
     Route::get('getEmailTemplates', [SettingController::class, 'getEmailTemplates'])->name('getEmailTemplates');
     Route::post('emailEditTemplate', [SettingController::class, 'emailEditTemplate'])->name('emailEditTemplate');
     Route::post('email-templates/store', [SettingController::class, 'emailTemplatesStore'])->name('emailTemplates.store');
     Route::put('email-templates/update', [SettingController::class, 'emailTemplatesUpdate'])->name('emailTemplates.update');
+    Route::put('settings/email-layout', [SettingController::class, 'saveEmailLayout'])->name('settings.email-layout.save');
 
     /**SMS Templates */
     Route::post('settings/sms-templates', [SettingController::class, 'smsTemplatesIndex'])->name('settings.sms-templates');
@@ -490,6 +501,7 @@ Route::group(['prefix' => '/', 'middleware' => 'auth'], function () {
     Route::get('getSettings', [SettingController::class, 'getSettings'])->name('settings.get');
 
     Route::post('save-general-settings', [SettingController::class, 'saveGeneralSettings'])->name('settings.general.save');
+    Route::post('save-email-signature-settings', [SettingController::class, 'saveEmailSignatureSettings'])->name('settings.email-signature.save');
     Route::post('save-profile-settings', [SettingController::class, 'saveProfileSettings'])->name('settings.profile.save');
     Route::post('save-sms-settings', [SettingController::class, 'saveSmsSettings'])->name('settings.sms.save');
     Route::post('save-google-settings', [SettingController::class, 'saveGoogleSettings'])->name('settings.google.save');

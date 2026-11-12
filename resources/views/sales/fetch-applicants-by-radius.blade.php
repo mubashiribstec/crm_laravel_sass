@@ -35,6 +35,30 @@
             /* main red bar */
             z-index: 2;
         }
+
+        .send-cv-existing-fields,
+        .send-cv-existing-fields .form-control,
+        .send-cv-existing-fields .form-check-label {
+            font-family: inherit;
+            font-size: 14px;
+        }
+
+        .send-cv-questionnaire-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem 1rem;
+        }
+
+        .sale-rich-preview {
+            display: -webkit-box;
+            overflow: hidden;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 3;
+            line-height: 1.5rem;
+            max-height: 4.5rem;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
     </style>
     <div class="row">
         <div class="col-lg-12">
@@ -48,7 +72,7 @@
                                         <li>
                                             <strong>PostCode:</strong>
                                             <span style="font-size:18px;">
-                                                {{ strtoupper($sale->sale_postcode) ?? 'N/A' }}
+                                                {{ strtoupper($sale->sale_postcode ?? 'N/A') }}
                                             </span>
 
                                             <button type="button"
@@ -58,6 +82,12 @@
                                                 <iconify-icon icon="solar:copy-linear" class="fs-18"></iconify-icon>
                                             </button>
                                         </li>
+
+                                        <li><strong>Head Office Name:</strong> {{ $office->office_name ?? 'N/A' }}</li>
+                                        <li><strong>Unit Name:</strong> {{ $unit->unit_name ?? 'N/A' }}</li>
+                                        <li><strong>Category:</strong>
+                                            {{ $jobCategory ? ucwords($jobCategory->name) . $jobType : 'N/A' }}</li>
+                                        <li><strong>Title:</strong> {{ $jobTitle ? ucwords($jobTitle->name) : 'N/A' }}</li>
                                         @php
                                             $remaining = (int) $sale->cv_limit - $sale_cv_count;
                                             $isFull = $sale_cv_count >= $sale->cv_limit;
@@ -85,11 +115,6 @@
                                                 </div>
                                             </div>
                                         </li>
-                                        <li><strong>Head Office Name:</strong> {{ $office->office_name ?? 'N/A' }}</li>
-                                        <li><strong>Unit Name:</strong> {{ $unit->unit_name ?? 'N/A' }}</li>
-                                        <li><strong>Category:</strong>
-                                            {{ $jobCategory ? ucwords($jobCategory->name) . $jobType : 'N/A' }}</li>
-                                        <li><strong>Title:</strong> {{ $jobTitle ? ucwords($jobTitle->name) : 'N/A' }}</li>
                                         @php
                                             $saleRichTextPreview = function (?string $html, int $limit = 300): string {
                                                 $html = $html ?? '';
@@ -106,6 +131,12 @@
                                                     $html,
                                                 );
                                                 $plainText = html_entity_decode(strip_tags($withBreaks ?? ''));
+                                                $plainText =
+                                                    preg_replace(
+                                                        '/https?:\/\/[^\s<>"\'\)\],]+/i',
+                                                        '[link]',
+                                                        $plainText,
+                                                    ) ?? $plainText;
                                                 $normalizedText = preg_replace("/[\r\n]+/", "\n", $plainText);
 
                                                 return e(Str::limit(trim($normalizedText ?? ''), $limit, '...'));
@@ -125,21 +156,102 @@
                                                         $html,
                                                     ) ?? $html;
 
-                                                libxml_use_internal_errors(true);
-                                                $doc = new DOMDocument();
-                                                $doc->loadHTML(
-                                                    '<?xml encoding="UTF-8"><div id="__sale_html_wrap__">' .
-                                                        $html .
-                                                        '</div>',
-                                                );
-                                                $wrap = $doc->getElementById('__sale_html_wrap__');
+                                                $previousLibxmlErrorSetting = libxml_use_internal_errors(true);
 
-                                                if ($wrap) {
-                                                    foreach (['script', 'iframe', 'object', 'embed'] as $tag) {
-                                                        $nodes = $wrap->getElementsByTagName($tag);
-                                                        for ($i = $nodes->length - 1; $i >= 0; $i--) {
-                                                            $node = $nodes->item($i);
-                                                            $node?->parentNode?->removeChild($node);
+                                                try {
+                                                    $doc = new DOMDocument();
+                                                    $loaded = $doc->loadHTML(
+                                                        '<?xml encoding="UTF-8"><div id="__sale_html_wrap__">' .
+                                                            $html .
+                                                            '</div>',
+                                                        LIBXML_NONET | LIBXML_HTML_NODEFDTD,
+                                                    );
+                                                    $wrap = $loaded ? $doc->getElementById('__sale_html_wrap__') : null;
+
+                                                    if (!$wrap) {
+                                                        return e(strip_tags($html));
+                                                    }
+
+                                                    $allowedTags = [
+                                                        'a',
+                                                        'b',
+                                                        'blockquote',
+                                                        'br',
+                                                        'div',
+                                                        'em',
+                                                        'h1',
+                                                        'h2',
+                                                        'h3',
+                                                        'h4',
+                                                        'h5',
+                                                        'h6',
+                                                        'i',
+                                                        'li',
+                                                        'ol',
+                                                        'p',
+                                                        'span',
+                                                        'strong',
+                                                        'table',
+                                                        'tbody',
+                                                        'td',
+                                                        'th',
+                                                        'thead',
+                                                        'tr',
+                                                        'u',
+                                                        'ul',
+                                                    ];
+                                                    $removeWithContents = [
+                                                        'embed',
+                                                        'iframe',
+                                                        'object',
+                                                        'script',
+                                                        'style',
+                                                    ];
+                                                    $nodes = iterator_to_array($wrap->getElementsByTagName('*'));
+
+                                                    for ($i = count($nodes) - 1; $i >= 0; $i--) {
+                                                        $node = $nodes[$i];
+                                                        $tag = strtolower($node->nodeName);
+
+                                                        if (in_array($tag, $removeWithContents, true)) {
+                                                            $node->parentNode?->removeChild($node);
+                                                            continue;
+                                                        }
+
+                                                        if (!in_array($tag, $allowedTags, true)) {
+                                                            while ($node->firstChild) {
+                                                                $node->parentNode?->insertBefore(
+                                                                    $node->firstChild,
+                                                                    $node,
+                                                                );
+                                                            }
+                                                            $node->parentNode?->removeChild($node);
+                                                            continue;
+                                                        }
+
+                                                        $href = null;
+                                                        if ($tag === 'a' && $node->hasAttribute('href')) {
+                                                            $candidate = trim($node->getAttribute('href'));
+                                                            $scheme = parse_url($candidate, PHP_URL_SCHEME);
+                                                            if (
+                                                                ($scheme === null &&
+                                                                    !str_starts_with($candidate, '//')) ||
+                                                                in_array(
+                                                                    strtolower((string) $scheme),
+                                                                    ['http', 'https', 'mailto', 'tel'],
+                                                                    true,
+                                                                )
+                                                            ) {
+                                                                $href = $candidate;
+                                                            }
+                                                        }
+
+                                                        while ($node->attributes->length > 0) {
+                                                            $node->removeAttributeNode($node->attributes->item(0));
+                                                        }
+
+                                                        if ($href !== null) {
+                                                            $node->setAttribute('href', $href);
                                                         }
                                                     }
 
@@ -147,13 +259,27 @@
                                                     foreach (iterator_to_array($wrap->childNodes) as $child) {
                                                         $safe .= $doc->saveHTML($child);
                                                     }
-                                                } else {
-                                                    $safe = strip_tags($html);
+
+                                                    return $safe;
+                                                } finally {
+                                                    libxml_clear_errors();
+                                                    libxml_use_internal_errors($previousLibxmlErrorSetting);
+                                                }
+                                            };
+
+                                            $saleRichTextUrlButton = function (?string $html): string {
+                                                if (
+                                                    !preg_match('/https?:\/\/[^\s<>"\'\)\],]+/i', $html ?? '', $matches)
+                                                ) {
+                                                    return '';
                                                 }
 
-                                                libxml_clear_errors();
+                                                $url = rtrim($matches[0], '.,;:!?');
 
-                                                return $safe;
+                                                return '<p class="text-center mt-3"><a href="' .
+                                                    e($url) .
+                                                    '" target="_blank" rel="noopener noreferrer" class="btn btn-info btn-sm rounded-pill px-3">' .
+                                                    '<iconify-icon icon="mdi:link-variant" class="me-1"></iconify-icon> Click to Open Link</a></p>';
                                             };
 
                                             $qualificationPreview = $saleRichTextPreview($sale->qualification);
@@ -162,49 +288,32 @@
                                             $qualificationHtml = $saleRichTextSafeHtml($sale->qualification);
                                             $benefitsHtml = $saleRichTextSafeHtml($sale->benefits);
                                             $experienceHtml = $saleRichTextSafeHtml($sale->experience);
+                                            $qualificationUrlButton = $saleRichTextUrlButton($sale->qualification);
+                                            $benefitsUrlButton = $saleRichTextUrlButton($sale->benefits);
+                                            $experienceUrlButton = $saleRichTextUrlButton($sale->experience);
+                                            $salaryHtml = $saleRichTextSafeHtml($sale->salary);
                                             $timingHtml = $saleRichTextSafeHtml($sale->timing);
                                         @endphp
 
-                                        <li>
-                                            <strong>Qualification:</strong>
-                                            <button type="button"
-                                                class="btn btn-link p-0 align-baseline text-start text-wrap"
-                                                data-bs-toggle="modal" data-bs-target="#qualification-{{ $sale->id }}">
-                                                {!! nl2br($qualificationPreview) !!}
-                                            </button>
-                                        </li>
-                                        <li>
-                                            <strong>Benefits:</strong>
-                                            <button type="button"
-                                                class="btn btn-link p-0 align-baseline text-start text-wrap"
-                                                data-bs-toggle="modal" data-bs-target="#benefits-{{ $sale->id }}">
-                                                {!! nl2br($benefitsPreview) !!}
-                                            </button>
-                                        </li>
                                     </ul>
                                 </div>
                                 <div class="col-md-6 mb-3">
+                                    <input type="hidden" id="sale_id" value="{{ $sale->id }}">
                                     <ul class="list-unstyled mb-0">
-                                        <input type="hidden" id="sale_id" value="{{ $sale->id }}">
-
                                         <li><strong>Sale ID#:</strong> {{ $sale->id ?? 'N/A' }}</li>
                                         <li><strong>Posted On:</strong>
                                             {{ \Carbon\Carbon::parse($sale->created_at)->format('d M Y, h:i A') }}</li>
-                                        <li><strong>Position Type:</strong> {!! $sale->position_type
-                                            ? '<span class="badge bg-primary text-white fs-12">' .
-                                                ucwords(str_replace('-', ' ', $sale->position_type)) .
-                                                '</span>'
-                                            : 'N/A' !!}</li>
-                                        <li><strong>Salary:</strong> {!! $sale->salary !!}</li>
-                                        <li><strong>Timing:</strong> {!! $timingHtml !!}</li>
                                         <li>
-                                            <strong>Experience:</strong>
-                                            <button type="button"
-                                                class="btn btn-link p-0 align-baseline text-start text-wrap"
-                                                data-bs-toggle="modal" data-bs-target="#experience-{{ $sale->id }}">
-                                                {!! nl2br($experiencePreview) !!}
-                                            </button>
+                                            <strong>Position Type:</strong>
+                                            @if ($sale->position_type)
+                                                <span
+                                                    class="badge bg-primary text-white fs-12">{{ ucwords(str_replace('-', ' ', $sale->position_type)) }}</span>
+                                            @else
+                                                N/A
+                                            @endif
                                         </li>
+                                        <li><strong>Salary:</strong> {!! $salaryHtml !== '' ? $salaryHtml : 'N/A' !!}</li>
+                                        <li><strong>Timing:</strong> {!! $timingHtml !!}</li>
                                         <li><strong>Status:</strong>
                                             @php
                                                 $status = $sale->status;
@@ -220,25 +329,58 @@
                                             @endphp
                                             {!! $statusClass !!}
                                         </li>
-                                        <li>
-                                            <!-- Button (Blade) -->
-                                            <button class="btn btn-info btn-sm my-1" type="button" id="viewJobDescription"
-                                                data-description="{{ $sale->job_description }}">
-                                                <span class="nav-icon">
-                                                    <i class="ri-file-text-line fs-16"></i>
-                                                </span>
-                                                Job Description
-                                            </button>
 
-                                            <button class="btn btn-warning btn-sm my-1" type="button" id="viewDocuments">
-                                                <span class="nav-icon">
-                                                    <i class="ri-file-text-line fs-16"></i>
-                                                </span>
-                                                View Documents
-                                            </button>
-                                        </li>
                                     </ul>
                                 </div>
+                            </div>
+                            <div class="row g-3 p-0">
+                                <div class="col-12 col-lg-4">
+                                    <div class="border rounded p-0 h-100">
+                                        <strong class="d-block mb-1">Qualification</strong>
+                                        <button type="button"
+                                            class="btn btn-link p-0 d-block w-100 text-start text-wrap sale-rich-preview"
+                                            data-bs-toggle="modal" data-bs-target="#qualification-{{ $sale->id }}">
+                                            {!! $qualificationPreview !== '' ? nl2br($qualificationPreview) : 'No details provided.' !!}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-12 col-lg-4">
+                                    <div class="border rounded p-0 h-100">
+                                        <strong class="d-block mb-1">Benefits</strong>
+                                        <button type="button"
+                                            class="btn btn-link p-0 d-block w-100 text-start text-wrap sale-rich-preview"
+                                            data-bs-toggle="modal" data-bs-target="#benefits-{{ $sale->id }}">
+                                            {!! $benefitsPreview !== '' ? nl2br($benefitsPreview) : 'No details provided.' !!}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-12 col-lg-4">
+                                    <div class="border rounded p-0 h-100">
+                                        <strong class="d-block mb-1">Experience</strong>
+                                        <button type="button"
+                                            class="btn btn-link p-0 d-block w-100 text-start text-wrap sale-rich-preview"
+                                            data-bs-toggle="modal" data-bs-target="#experience-{{ $sale->id }}">
+                                            {!! $experiencePreview !== '' ? nl2br($experiencePreview) : 'No details provided.' !!}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-3 d-flex flex-wrap gap-2">
+                                <!-- Button (Blade) -->
+                                <button class="btn btn-info btn-sm my-1" type="button" id="viewJobDescription"
+                                    data-description="{{ $sale->job_description }}">
+                                    <span class="nav-icon">
+                                        <i class="ri-file-text-line fs-16"></i>
+                                    </span>
+                                    Job Description
+                                </button>
+
+                                <button class="btn btn-warning btn-sm my-1" type="button" id="viewDocuments">
+                                    <span class="nav-icon">
+                                        <i class="ri-file-text-line fs-16"></i>
+                                    </span>
+                                    View Documents
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -250,10 +392,29 @@
         <div class="col-xl-12 col-lg-12">
             <div class="card">
                 <div class="card-body">
-                    <div class="row">
-                        <div class="col-xl-12">
-                            <h4 class="card-title mb-3">Active Applicants within {{ $radius }}KMs /
-                                {{ $radiusInMiles }}Miles</h4>
+                    <div class="row justify-content-between align-items-center">
+                        <h4 class="card-title mb-3">Active Applicants within {{ $radius }}KMs /
+                            {{ $radiusInMiles }}Miles</h4>
+                    </div>
+                    <div class="row justify-content-between align-items-center">
+                        <div class="col-xl-3">
+                            <div class="text-md-start mb-3">
+                                <div class="input-group">
+                                    <!-- Use padding-right to prevent text from overlapping the clear icon -->
+                                    <input type="text" id="customSearchInput" class="form-control"
+                                        placeholder="Search ..." style="padding-right: 30px;">
+                                    <!-- Absolutely positioned over the input field -->
+                                    <span class="position-absolute d-none" id="customClearBtn" title="Clear"
+                                        style="right: 105px; top: 50%; transform: translateY(-50%); z-index: 10; cursor: pointer;">
+                                        <i class="ri-close-line text-primary"
+                                            style="font-size: 20px; font-weight: 900;"></i>
+                                    </span>
+                                    <button class="btn btn-primary z-3" id="customSearchBtn" type="button"><i
+                                            class="ri-search-line"></i> Search</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-xl-9">
                             <div class="text-end mb-3">
                                 <div class="d-inline-flex flex-wrap justify-content-end align-items-center">
 
@@ -273,7 +434,8 @@
                                                     class="filter-select-all text-primary small fw-semibold me-2"
                                                     data-target=".source-filter" data-exclude="[data-source-id='']">Select
                                                     All</a>
-                                                <a href="#" class="filter-deselect-all text-danger small fw-semibold"
+                                                <a href="#"
+                                                    class="filter-deselect-all text-danger small fw-semibold"
                                                     data-target=".source-filter" data-exclude="[data-source-id='']"
                                                     style="display:none">Deselect All</a>
                                             </div>
@@ -342,7 +504,7 @@
                                         </div>
                                     @endcanany
                                     <!-- Add Updated Sales Filter Button -->
-                                    <button class="btn btn-success my-1"
+                                    <button class="btn btn-success my-1 me-1"
                                         title="Mark selected as having nursing home experience" type="button"
                                         id="markNursingHomeBtn">
                                         <span class="nav-icon">
@@ -361,8 +523,28 @@
                                 </div>
                                 <!-- Button Dropdown -->
                             </div>
+                        </div>
+                    </div>
+                    <div class="row justify-content-between align-items-center">
+                        <div class="col-xl-12">
                             <div class="card">
                                 <div class="card-body p-3">
+                                    <div id="columnsToolbar" class="dropdown d-inline">
+                                        <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button"
+                                            id="dropdownMenuColumns" data-bs-toggle="dropdown" aria-expanded="false">
+                                            <i class="ri-layout-column-line me-1"></i> Columns
+                                        </button>
+                                        <div class="dropdown-menu filter-dropdowns p-2"
+                                            aria-labelledby="dropdownMenuColumns" style="min-width: 230px;">
+                                            <div class="d-flex justify-content-between align-items-center px-1 mb-2">
+                                                <a href="#" id="columnsSelectAll"
+                                                    class="text-primary small fw-semibold">Show All</a>
+                                                <a href="#" id="columnsResetDefault"
+                                                    class="text-secondary small fw-semibold">Reset Default</a>
+                                            </div>
+                                            <div id="columnsList" style="max-height: 280px; overflow-y: auto;"></div>
+                                        </div>
+                                    </div>
                                     <div class="table-responsive">
                                         <table id="applicants_table" class="table align-middle mb-3">
                                             <thead class="bg-light-subtle">
@@ -409,7 +591,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    {!! $qualificationHtml !!}
+                    {!! $qualificationHtml . $qualificationUrlButton !!}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-dark" data-bs-dismiss="modal">Close</button>
@@ -426,7 +608,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    {!! $benefitsHtml !!}
+                    {!! $benefitsHtml . $benefitsUrlButton !!}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-dark" data-bs-dismiss="modal">Close</button>
@@ -443,7 +625,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    {!! $experienceHtml !!}
+                    {!! $experienceHtml . $experienceUrlButton !!}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-dark" data-bs-dismiss="modal">Close</button>
@@ -497,6 +679,129 @@
             function showLoader() {
                 $('#applicants_table tbody').empty().append(loadingRow);
             }
+
+            const columnConfig = [{
+                    title: 'Select',
+                    toggleable: false
+                },
+                {
+                    title: 'Date',
+                    default: true
+                },
+                {
+                    title: 'Applicant Name',
+                    default: true
+                },
+                {
+                    title: 'Email',
+                    default: true
+                },
+                {
+                    title: 'Title',
+                    default: true
+                },
+                {
+                    title: 'Category',
+                    default: true
+                },
+                {
+                    title: 'PostCode',
+                    default: true
+                },
+                {
+                    title: 'Phone / Landline',
+                    default: true
+                },
+                {
+                    title: 'Applicant Resume',
+                    default: true
+                },
+                {
+                    title: 'CRM Resume',
+                    default: true
+                },
+                {
+                    title: 'Experience',
+                    default: true
+                },
+                {
+                    title: 'Source',
+                    default: true
+                },
+                {
+                    title: 'Notes',
+                    default: true
+                },
+                {
+                    title: 'Status',
+                    default: true
+                },
+                {
+                    title: 'Action',
+                    toggleable: false
+                }
+            ];
+            const columnVisibilityStorageKey = 'sale_radius_applicants_column_visibility_v1';
+
+            function loadColumnVisibility() {
+                let stored = {};
+                try {
+                    stored = JSON.parse(localStorage.getItem(columnVisibilityStorageKey)) || {};
+                } catch (error) {
+                    stored = {};
+                }
+
+                return columnConfig.map(function(column, index) {
+                    if (column.toggleable === false) {
+                        return true;
+                    }
+                    return Object.prototype.hasOwnProperty.call(stored, index) ?
+                        !!stored[index] :
+                        !!column.default;
+                });
+            }
+
+            function saveColumnVisibility() {
+                const stored = {};
+                columnConfig.forEach(function(column, index) {
+                    if (column.toggleable !== false) {
+                        stored[index] = !!columnVisibility[index];
+                    }
+                });
+                localStorage.setItem(columnVisibilityStorageKey, JSON.stringify(stored));
+            }
+
+            let columnVisibility = loadColumnVisibility();
+
+            function renderColumnsDropdown() {
+                const list = $('#columnsList').empty();
+                columnConfig.forEach(function(column, index) {
+                    if (column.toggleable === false) {
+                        return;
+                    }
+
+                    const checked = columnVisibility[index] ? 'checked' : '';
+                    list.append(`
+                        <div class="form-check">
+                            <input class="form-check-input column-toggle" type="checkbox"
+                                id="column_${index}" data-column-index="${index}" ${checked}>
+                            <label class="form-check-label" for="column_${index}">${column.title}</label>
+                        </div>
+                    `);
+                });
+            }
+
+            function getHiddenColumnIndices() {
+                return columnVisibility
+                    .map(function(visible, index) {
+                        return visible ? null : index;
+                    })
+                    .filter(function(index) {
+                        return index !== null;
+                    });
+            }
+
+            renderColumnsDropdown();
 
             // Initialize DataTable with server-side processing
             var table = $('#applicants_table').DataTable({
@@ -625,6 +930,10 @@
                         createdCell: function(td, cellData, rowData, row, col) {
                             $(td).css('text-align', 'center'); // Center the text in this column
                         }
+                    },
+                    {
+                        targets: getHiddenColumnIndices(),
+                        visible: false
                     }
                 ],
                 createdRow: function(row, data, dataIndex) {
@@ -642,7 +951,13 @@
                     return 'row_' + data
                         .id; // Assign a unique ID to each row using the 'id' field from the data
                 },
-                dom: 'flrtip', // Change the order to 'filter' (f), 'length' (l), 'table' (r), 'pagination' (p), and 'information' (i)
+                dom: '<"d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2"l>rtip',
+                initComplete: function() {
+                    const api = this.api();
+                    $(api.table().container())
+                        .find('.dataTables_length')
+                        .after($('#columnsToolbar'));
+                },
                 drawCallback: function(settings) {
                     const api = this.api();
                     const pagination = $(api.table().container()).find('.dataTables_paginate');
@@ -723,6 +1038,71 @@
                 },
             });
 
+            $(document).on('change', '.column-toggle', function() {
+                const index = parseInt($(this).data('column-index'), 10);
+                columnVisibility[index] = $(this).is(':checked');
+                table.column(index).visible(columnVisibility[index]);
+                saveColumnVisibility();
+            });
+
+            $('#columnsSelectAll').on('click', function(event) {
+                event.preventDefault();
+                columnConfig.forEach(function(column, index) {
+                    if (column.toggleable !== false) {
+                        columnVisibility[index] = true;
+                        table.column(index).visible(true);
+                    }
+                });
+                saveColumnVisibility();
+                renderColumnsDropdown();
+            });
+
+            $('#columnsResetDefault').on('click', function(event) {
+                event.preventDefault();
+                columnConfig.forEach(function(column, index) {
+                    if (column.toggleable !== false) {
+                        columnVisibility[index] = !!column.default;
+                        table.column(index).visible(columnVisibility[index]);
+                    }
+                });
+                saveColumnVisibility();
+                renderColumnsDropdown();
+            });
+
+            // Search logic helper
+            function handleCustomSearch() {
+                let searchValue = $('#customSearchInput').val().trim();
+                table.search(searchValue).draw();
+            }
+
+            // Custom Search Button Event
+            $('#customSearchBtn').on('click', function() {
+                handleCustomSearch();
+            });
+
+            // Custom Search Input Enter Key Event
+            $('#customSearchInput').on('keypress', function(e) {
+                if (e.which == 13) { // Enter key
+                    e.preventDefault();
+                    handleCustomSearch();
+                }
+            });
+
+            // Show/Hide Clear button
+            $('#customSearchInput').on('keyup change', function() {
+                if ($(this).val().trim() !== '') {
+                    $('#customClearBtn').removeClass('d-none');
+                } else {
+                    $('#customClearBtn').addClass('d-none');
+                }
+            });
+
+            // Clear Button Event
+            $('#customClearBtn').on('click', function() {
+                $('#customSearchInput').val('');
+                $(this).addClass('d-none');
+                table.search('').draw();
+            });
             $('.applicant-status-filter').on('click', function() {
                 currentApplicantStatusFilter = $(this).text().toLowerCase().replace(/\s+/g, ' ').trim();
                 if (currentApplicantStatusFilter === 'all applicant status') {
@@ -945,7 +1325,7 @@
                 $('body').append(
                     '<div class="modal fade" id="' + modalId + '" tabindex="-1" aria-labelledby="' + modalId +
                     'Label" aria-hidden="true">' +
-                    '<div class="modal-dialog modal-lg modal-dialog-top">' +
+                    '<div class="modal-dialog modal-md modal-dialog-scrollable modal-dialog-top">' +
                     '<div class="modal-content">' +
                     '<div class="modal-header">' +
                     '<h5 class="modal-title" id="' + modalId + 'Label">Add Notes</h5>' +
@@ -1099,16 +1479,55 @@
         function sendCVModal(applicantID, saleID, applicantPostcode, applicantNursingHomeExp) {
             const modalID = 'sendCVModal' + applicantID + '-' + saleID;
             const formID = 'sendCV_form' + applicantID + '-' + saleID;
+            const updateNurseFields = function() {
+                const form = $('#' + formID);
+                const category = form.find('[name="category"]:checked').val();
+                const isNonNurse = category === 'Non Nurse';
+                const isNursery = category === 'Nursery';
+                const hideNurseFields = category !== 'Nurse';
+                form.find('[data-send-cv-page="2"] [data-send-cv-question] .form-label').each(function() {
+                    const label = $(this);
+                    if (label.data('original-label') === undefined) {
+                        label.data('original-label', label.text());
+                    }
+                    label.text(label.data('original-label'));
+                });
+                form.find('[data-nurse-label]').each(function() {
+                    const label = $(this);
+                    label.text(isNursery
+                        ? label.data('nursery-label')
+                        : isNonNurse
+                            ? label.data('non-nurse-label')
+                            : label.data('nurse-label'));
+                });
+                form.find('[data-nurse-only]').each(function() {
+                    const fields = $(this).find(':input');
+                    $(this).toggleClass('d-none', hideNurseFields);
+                    fields.prop('disabled', hideNurseFields);
+                    if (hideNurseFields) {
+                        fields.filter(':checkbox').prop('checked', false);
+                        fields.filter('textarea').val('');
+                    }
+                });
+                let questionNumber = 5;
+                form.find('[data-send-cv-page="2"] [data-send-cv-question]').each(function() {
+                    if ($(this).hasClass('d-none')) {
+                        return;
+                    }
+                    const label = $(this).find('.form-label').first();
+                    label.text(label.text().replace(/^\d+\.\s*/, questionNumber++ + '. '));
+                });
+            };
 
             // Add modal if not exists
             if ($('#' + modalID).length === 0) {
                 $('body').append(
                     '<div class="modal fade" id="' + modalID +
-                    '" tabindex="-1" aria-labelledby="sendCVModalLabel" aria-hidden="true">' +
-                    '<div class="modal-dialog modal-lg modal-dialog-top">' +
+                    '" tabindex="-1" aria-labelledby="' + modalID + 'Label" aria-hidden="true">' +
+                    '<div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-top">' +
                     '<div class="modal-content">' +
                     '<div class="modal-header">' +
-                    '<h5 class="modal-title" id="sendCVModalLabel">Fill Out Form To Send CV</h5>' +
+                    '<h5 class="modal-title" id="' + modalID + 'Label">Fill Out Form To Send CV</h5>' +
                     '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>' +
                     '</div>' +
                     '<div class="modal-body">' +
@@ -1117,153 +1536,390 @@
                     '<input type="hidden" name="sale_id" value="' + saleID + '">' +
                     '<input type="hidden" name="_token" value="{{ csrf_token() }}">' +
 
-                    '<div class="form-group row">' +
-                    '<label class="col-form-label col-sm-3"><strong style="font-size:18px">1.</strong> Current Employer Name</label>' +
-                    '<div class="col-sm-9">' +
-                    '<input type="text" name="current_employer_name" class="form-control" placeholder="Enter Employer Name">' +
+                    '<div data-send-cv-page="2" class="d-none">' +
+                    '<div class="card border-0 shadow-sm mb-4">' +
+                    '<div class="card-header bg-light">' +
+                    '<h6 class="mb-1">Applicant Information</h6>' +
+                    '<small class="text-muted">Add the applicant’s statement for each question.</small>' +
                     '</div>' +
-                    '</div>' +
-                    '<div class="form-group row">' +
-                    '<label class="col-form-label col-sm-3"><strong style="font-size:18px">2.</strong> PostCode</label>' +
-                    '<div class="col-sm-9">' +
-                    '<input type="text" name="postcode" class="form-control" placeholder="Enter PostCode" value="' +
-                    applicantPostcode + '">' +
-                    '</div>' +
-                    '</div>' +
-                    '<div class="form-group row">' +
-                    '<label class="col-form-label col-sm-3"><strong style="font-size:18px">3.</strong> Current/Expected Salary</label>' +
-                    '<div class="col-sm-9">' +
-                    '<input type="number" name="expected_salary" class="form-control" placeholder="Enter Salary">' +
-                    '</div>' +
-                    '</div>' +
-                    '<div class="form-group row">' +
-                    '<label class="col-form-label col-sm-3"><strong style="font-size:18px">4.</strong> Qualification</label>' +
-                    '<div class="col-sm-9">' +
-                    '<input type="text" name="qualification" class="form-control" placeholder="Enter Qualification">' +
-                    '</div>' +
-                    '</div>' +
-                    '<div class="form-group row">' +
-                    '<label class="col-form-label col-sm-3"><strong style="font-size:18px">5.</strong> Transport Type</label>' +
-                    '<div class="col-sm-9 d-flex align-items-center">' +
+                    '<div class="card-body">' +
+                    '<div class="row g-3">' +
+                    '<div class="col-12">' +
+                    '<label class="form-label d-block">Category</label>' +
                     '<div class="form-check form-check-inline">' +
-                    '<input class="form-check-input" type="checkbox" name="transport_type[]" id="by_walk" value="By Walk"><label class="form-check-label" for="by_walk">By Walk</label>' +
+                    '<input class="form-check-input" type="radio" name="category" id="category_nurse_' + applicantID +
+                    '_' + saleID + '" value="Nurse" checked>' +
+                    '<label class="form-check-label" for="category_nurse_' + applicantID + '_' + saleID +
+                    '">Nurse</label>' +
                     '</div>' +
                     '<div class="form-check form-check-inline">' +
-                    '<input class="form-check-input" type="checkbox" name="transport_type[]" id="cycle" value="Cycle">' +
-                    '<label class="form-check-label" for="cycle">Cycle</label>' +
-                    '</div>' +
-                    '<div class="form-check form-check-inline ml-3">' +
-                    '<input class="form-check-input" type="checkbox" name="transport_type[]" id="car" value="Car">' +
-                    '<label class="form-check-label" for="car">Car</label>' +
-                    '</div>' +
-                    '<div class="form-check form-check-inline ml-3">' +
-                    '<input class="form-check-input" type="checkbox" name="transport_type[]" id="public_transport" value="Public Transport">' +
-                    '<label class="form-check-label" for="public_transport">Public Transport</label>' +
-                    '</div>' +
-                    '</div>' +
-                    '</div>' +
-                    '<div class="form-group row">' +
-                    '<label class="col-form-label col-sm-3"><strong style="font-size:18px">6.</strong> Shift Pattern</label>' +
-                    '<div class="col-sm-9 d-flex align-items-center">' +
-                    '<div class="form-check form-check-inline">' +
-                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="day" value="Day">' +
-                    '<label class="form-check-label" for="day">Day</label>' +
+                    '<input class="form-check-input" type="radio" name="category" id="category_non_nurse_' +
+                    applicantID + '_' + saleID + '" value="Non Nurse">' +
+                    '<label class="form-check-label" for="category_non_nurse_' + applicantID + '_' + saleID +
+                    '">Non Nurse</label>' +
                     '</div>' +
                     '<div class="form-check form-check-inline">' +
-                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="night" value="Night">' +
-                    '<label class="form-check-label" for="night">Night</label>' +
+                    '<input class="form-check-input" type="radio" name="category" id="category_nursery_' +
+                    applicantID + '_' + saleID + '" value="Nursery">' +
+                    '<label class="form-check-label" for="category_nursery_' + applicantID + '_' + saleID +
+                    '">Nursery</label>' +
                     '</div>' +
-                    '<div class="form-check form-check-inline ml-3">' +
-                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="full_time" value="Full Time">' +
-                    '<label class="form-check-label" for="full_time">Full Time</label>' +
+                    '<div class="text-danger small d-none" data-category-error>Please select a category.</div>' +
                     '</div>' +
-                    '<div class="form-check form-check-inline ml-3">' +
-                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="part_time" value="Part Time">' +
-                    '<label class="form-check-label" for="part_time">Part Time</label>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question data-nurse-only>' +
+                    '<label class="form-label" for="nmc_pin_status_' + applicantID + '_' + saleID +
+                    '">5. NMC PIN Status</label>' +
+                    '<textarea name="nmc_pin_status" id="nmc_pin_status_' + applicantID + '_' + saleID +
+                    '" class="form-control" rows="2" placeholder="Enter the applicant’s NMC PIN status"></textarea>' +
                     '</div>' +
-                    '<div class="form-check form-check-inline ml-3">' +
-                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="twenty_four_hours" value="24 hours">' +
-                    '<label class="form-check-label" for="twenty_four_hours">24 Hours</label>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="notice_period_' + applicantID + '_' + saleID +
+                    '">6. Notice Period</label>' +
+                    '<textarea name="notice_period" id="notice_period_' + applicantID + '_' + saleID +
+                    '" class="form-control" rows="2" placeholder="Enter the applicant’s notice period"></textarea>' +
                     '</div>' +
-                    '<div class="form-check form-check-inline">' +
-                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="day_night" value="Day/Night">' +
-                    '<label class="form-check-label" for="day_night">Day/Night</label>' +
-                    '</div>' +
-                    '</div>' +
-                    '</div>' +
-                    '<div class="form-group row">' +
-                    '<label class="col-form-label col-sm-3"><strong style="font-size:18px">7.</strong> Visa Status</label>' +
-                    '<div class="col-sm-9 d-flex align-items-center">' +
-                    '<div class="d-flex">' +
-                    '<div class="form-check form-check-inline">' +
-                    '<input type="radio" name="visa_status" id="british" class="form-check-input" value="British">' +
-                    '<label class="form-check-label" for="british">British</label>' +
-                    '</div>' +
-                    '<div class="form-check form-check-inline ml-3">' +
-                    '<input type="radio" name="visa_status" id="required_sponsorship" class="form-check-input" value="Required Sponsorship">' +
-                    '<label class="form-check-label" for="required_sponsorship">Required Sponsorship</label>' +
+                    '<div class="col-12" data-send-cv-question data-nurse-only>' +
+                    '<label class="form-label d-block">7. Clinical Skills</label>' +
+                    '<div class="row g-2">' +
+                    '<div class="col-6 col-md-3">' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="clinical_skills[]" id="clinical_wound_care_' +
+                    applicantID + '_' + saleID + '" value="Wound Care">' +
+                    '<label class="form-check-label" for="clinical_wound_care_' + applicantID + '_' + saleID +
+                    '">Wound Care</label>' +
                     '</div>' +
                     '</div>' +
+                    '<div class="col-6 col-md-3">' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="clinical_skills[]" id="clinical_catheterization_' +
+                    applicantID + '_' + saleID + '" value="Catheterization">' +
+                    '<label class="form-check-label" for="clinical_catheterization_' + applicantID + '_' + saleID +
+                    '">Catheterization</label>' +
                     '</div>' +
                     '</div>' +
-                    '<div class="form-group row">' +
-                    '<div class="col-6 my-2">' +
+                    '<div class="col-6 col-md-3">' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="clinical_skills[]" id="clinical_venepuncture_' +
+                    applicantID + '_' + saleID + '" value="Venepuncture">' +
+                    '<label class="form-check-label" for="clinical_venepuncture_' + applicantID + '_' + saleID +
+                    '">Venepuncture</label>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div class="col-6 col-md-3">' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="clinical_skills[]" id="clinical_peg_feeding_' +
+                    applicantID + '_' + saleID + '" value="PEG Feeding">' +
+                    '<label class="form-check-label" for="clinical_peg_feeding_' + applicantID + '_' + saleID +
+                    '">PEG Feeding</label>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div class="col-6 col-md-3">' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="clinical_skills[]" id="clinical_tracheostomy_care_' +
+                    applicantID + '_' + saleID + '" value="Tracheostomy Care">' +
+                    '<label class="form-check-label" for="clinical_tracheostomy_care_' + applicantID + '_' + saleID +
+                    '">Tracheostomy Care</label>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div class="col-6 col-md-3">' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="clinical_skills[]" id="clinical_suctioning_' +
+                    applicantID + '_' + saleID + '" value="Suctioning">' +
+                    '<label class="form-check-label" for="clinical_suctioning_' + applicantID + '_' + saleID +
+                    '">Suctioning</label>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div class="col-6 col-md-3">' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="clinical_skills[]" id="clinical_dementia_care_' +
+                    applicantID + '_' + saleID + '" value="Dementia Care">' +
+                    '<label class="form-check-label" for="clinical_dementia_care_' + applicantID + '_' + saleID +
+                    '">Dementia Care</label>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div class="col-6 col-md-3">' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="clinical_skills[]" id="clinical_palliative_care_' +
+                    applicantID + '_' + saleID + '" value="Palliative Care">' +
+                    '<label class="form-check-label" for="clinical_palliative_care_' + applicantID + '_' + saleID +
+                    '">Palliative Care</label>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="visa_status_' + applicantID + '_' + saleID +
+                    '">8. Visa Status</label>' +
+                    '<textarea name="visa_status" id="visa_status_' + applicantID + '_' + saleID +
+                    '" class="form-control" rows="2" placeholder="Enter the applicant’s visa status"></textarea>' +
+                    '</div>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="dbs_convictions_' + applicantID + '_' + saleID +
+                    '">9. Convictions on DBS</label>' +
+                    '<textarea name="dbs_convictions" id="dbs_convictions_' + applicantID + '_' + saleID +
+                    '" class="form-control" rows="2" placeholder="Record the applicant’s statement"></textarea>' +
+                    '</div>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="expected_hourly_rate_' + applicantID + '_' + saleID +
+                    '">10. Expected Hourly Rate</label>' +
+                    '<textarea name="expected_hourly_rate" id="expected_hourly_rate_' + applicantID + '_' + saleID +
+                    '" class="form-control" rows="2" placeholder="Enter the expected hourly rate"></textarea>' +
+                    '</div>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="holidays_booked_' + applicantID + '_' + saleID +
+                    '">11. Holidays Booked</label>' +
+                    '<textarea name="holidays_booked" id="holidays_booked_' + applicantID + '_' + saleID +
+                    '" class="form-control" rows="2" placeholder="Record any holidays already booked"></textarea>' +
+                    '</div>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="reasons_for_job_change_' + applicantID + '_' + saleID +
+                    '">12. Reasons for Job Change</label>' +
+                    '<textarea name="reasons_for_job_change" id="reasons_for_job_change_' + applicantID + '_' + saleID +
+                    '" class="form-control" rows="2" placeholder="Record the applicant’s reasons"></textarea>' +
+                    '</div>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="nursing_experience_years_' + applicantID + '_' + saleID +
+                    '" data-nurse-label="13. Years of Experience as a Nurse" data-non-nurse-label="13. Years of Experience as a Carer, care assistant or support worker" data-nursery-label="13. Years of Experience as a Nursery">13. Years of Experience as a Nurse</label>' +
+                    '<textarea name="nursing_experience_years" id="nursing_experience_years_' + applicantID + '_' +
+                    saleID + '" class="form-control" rows="2" placeholder="Enter years of experience"></textarea>' +
+                    '</div>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="nursing_home_experience_' + applicantID + '_' + saleID +
+                    '" data-nurse-label="14. Years of Experience as a Nurse in Nursing Home" data-non-nurse-label="14. Years of Experience as a Carer, care assistant or support worker" data-nursery-label="14. Years of Experience as a nursery day care center">14. Years of Experience as a Nurse in Nursing Home</label>' +
+                    '<textarea name="nursing_home_experience" id="nursing_home_experience_' + applicantID + '_' +
+                    saleID +
+                    '" class="form-control" rows="2" placeholder="Record the applicant’s nursing home experience"></textarea>' +
+                    '</div>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="manager_rota_' + applicantID + '_' + saleID +
+                    '">15. Working According to the Manager’s Rota</label>' +
+                    '<textarea name="manager_rota" id="manager_rota_' + applicantID + '_' + saleID +
+                    '" class="form-control" rows="2" placeholder="Record the applicant’s response"></textarea>' +
+                    '</div>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="current_dbs_status_' + applicantID + '_' + saleID +
+                    '">16. Current DBS Status</label>' +
+                    '<textarea name="current_dbs_status" id="current_dbs_status_' + applicantID + '_' + saleID +
+                    '" class="form-control" rows="2" placeholder="Enter the current DBS status"></textarea>' +
+                    '</div>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="expected_salary_' + applicantID + '_' + saleID +
+                    '">17. Expected Salary</label>' +
+                    '<textarea name="expected_salary" id="expected_salary_' + applicantID + '_' + saleID +
+                    '" class="form-control" rows="2" placeholder="Enter the expected salary"></textarea>' +
+                    '</div>' +
+                    '<div class="col-12 col-md-6" data-send-cv-question>' +
+                    '<label class="form-label" for="qualification_' + applicantID + '_' + saleID +
+                    '">18. Qualification</label>' +
+                    '<textarea name="qualification" id="qualification_' + applicantID + '_' + saleID +
+                    '" class="form-control" rows="2" placeholder="Enter the qualification"></textarea>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div data-send-cv-page="1">' +
+                    '<div class="card border-0 shadow-sm mb-4">' +
+                    '<div class="card-header bg-light">' +
+                    '<h6 class="mb-1">First Information</h6>' +
+                    '<small class="text-muted">Add transport, shift, and availability details.</small>' +
+                    '</div>' +
+                    '<div class="card-body send-cv-existing-fields">' +
+                    '<div class="row g-3">' +
+                    '<div class="col-12">' +
+                    '<label class="form-label d-block">1. Transport Type</label>' +
+                    '<div class="send-cv-questionnaire-options">' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="transport_type[]" id="by_walk_' +
+                    applicantID + '_' + saleID + '" value="By Walk"><label class="form-check-label" for="by_walk_' +
+                    applicantID + '_' + saleID + '">By Walk</label>' +
+                    '</div>' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="transport_type[]" id="cycle_' + applicantID +
+                    '_' + saleID + '" value="Cycle">' +
+                    '<label class="form-check-label" for="cycle_' + applicantID + '_' + saleID + '">Cycle</label>' +
+                    '</div>' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="transport_type[]" id="car_' + applicantID +
+                    '_' + saleID + '" value="Car">' +
+                    '<label class="form-check-label" for="car_' + applicantID + '_' + saleID + '">Car</label>' +
+                    '</div>' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="transport_type[]" id="public_transport_' +
+                    applicantID + '_' + saleID + '" value="Public Transport">' +
+                    '<label class="form-check-label" for="public_transport_' + applicantID + '_' + saleID +
+                    '">Public Transport</label>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div class="col-12">' +
+                    '<label class="form-label d-block">2. Shift Pattern</label>' +
+                    '<div class="send-cv-questionnaire-options">' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="day_' + applicantID +
+                    '_' + saleID + '" value="Day">' +
+                    '<label class="form-check-label" for="day_' + applicantID + '_' + saleID + '">Day</label>' +
+                    '</div>' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="night_' + applicantID +
+                    '_' + saleID + '" value="Night">' +
+                    '<label class="form-check-label" for="night_' + applicantID + '_' + saleID + '">Night</label>' +
+                    '</div>' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="full_time_' +
+                    applicantID + '_' + saleID + '" value="Full Time">' +
+                    '<label class="form-check-label" for="full_time_' + applicantID + '_' + saleID +
+                    '">Full Time</label>' +
+                    '</div>' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="part_time_' +
+                    applicantID + '_' + saleID + '" value="Part Time">' +
+                    '<label class="form-check-label" for="part_time_' + applicantID + '_' + saleID +
+                    '">Part Time</label>' +
+                    '</div>' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="twenty_four_hours_' +
+                    applicantID + '_' + saleID + '" value="24 hours">' +
+                    '<label class="form-check-label" for="twenty_four_hours_' + applicantID + '_' + saleID +
+                    '">24 Hours</label>' +
+                    '</div>' +
+                    '<div class="form-check">' +
+                    '<input class="form-check-input" type="checkbox" name="shift_pattern[]" id="day_night_' +
+                    applicantID + '_' + saleID + '" value="Day/Night">' +
+                    '<label class="form-check-label" for="day_night_' + applicantID + '_' + saleID +
+                    '">Day/Night</label>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div class="form-group row mb-2">' +
+
+                    '<div class="col-12">' +
+                    '<div class="row g-3 mt-2">' +
+                    '<div class="col-12 col-sm-6">' +
+                    '<label class="form-label" for="interview_option_1_' + applicantID + '_' + saleID +
+                    '">3. Interview Availability Same Week</label>' +
+                    '<input class="form-control" type="datetime-local" name="interview_option_1" id="interview_option_1_' +
+                    applicantID + '_' + saleID + '" required>' +
+                    '</div>' +
+                    '<div class="col-12 col-sm-6">' +
+                    '<label class="form-label" for="interview_option_2_' + applicantID + '_' + saleID +
+                    '">4. Interview Availability Next Week</label>' +
+                    '<input class="form-control" type="datetime-local" name="interview_option_2" id="interview_option_2_' +
+                    applicantID + '_' + saleID + '" required>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '<div class="col-12 col-sm-6 my-2">' +
                     '<div class="form-check form-switch">' +
-                    '<input class="form-check-input" type="checkbox" role="switch" ' +
-                    'name="nursing_home" ' +
-                    'id="nursing_home_checkbox" ' +
-                    (applicantNursingHomeExp == 1 ? 'checked ' : '') +
-                    'value="on">' +
-                    '<label class="form-check-label" for="nursing_home_checkbox">Nursing Home</label>' +
+                    '<input class="form-check-input" type="checkbox" name="hangup_call" role="switch" id="hangup_call_checkbox_' +
+                    applicantID + '_' + saleID + '" value="1">' +
+                    '<label class="form-check-label" for="hangup_call_checkbox_' + applicantID + '_' + saleID +
+                    '">Call Hung up/Not Interested</label>' +
                     '</div>' +
                     '</div>' +
-                    '<div class="col-6 my-2">' +
+                    '<div class="col-12 col-sm-6 my-2">' +
                     '<div class="form-check form-switch">' +
-                    '<input class="form-check-input" type="checkbox" role="switch" name="alternate_weekend" id="alternate_weekend_checkbox">' +
-                    '<label class="form-check-label" for="alternate_weekend_checkbox">Alternate Weekend</label>' +
+                    '<input class="form-check-input" type="checkbox" role="switch" name="no_job" id="no_job_checkbox_' +
+                    applicantID + '_' + saleID + '" value="1">' +
+                    '<label class="form-check-label" for="no_job_checkbox_' + applicantID + '_' + saleID +
+                    '">No Job</label>' +
                     '</div>' +
                     '</div>' +
-                    '<div class="col-6 my-2">' +
-                    '<div class="form-check form-switch">' +
-                    '<input class="form-check-input" type="checkbox" role="switch" name="interview_availability" id="interview_availability_checkbox">' +
-                    '<label class="form-check-label" for="interview_availability_checkbox">Interview Availability</label>' +
-                    '</div>' +
-                    '</div>' +
-                    '<div class="col-6 my-2">' +
-                    '<div class="form-check form-switch">' +
-                    '<input class="form-check-input" type="checkbox" role="switch" name="no_job" id="no_job_checkbox" onclick="handleCheckboxClick(\'no_job_checkbox\', \'hangup_call_checkbox\')">' +
-                    '<label class="form-check-label" for="no_job_checkbox">No Job</label>' +
-                    '</div>' +
-                    '</div>' +
-                    '<div class="col-6 my-2">' +
-                    '<div class="form-check form-switch">' +
-                    '<input class="form-check-input" type="checkbox" name="hangup_call" role="switch" id="hangup_call_checkbox" onclick="handleCheckboxClick(\'hangup_call_checkbox\', \'no_job_checkbox\')">' +
-                    '<label class="form-check-label" for="hangup_call_checkbox">Call Hung up/Not Interested</label>' +
-                    '</div>' +
-                    '</div>' +
-                    '</div>' +
-                    '<div class="form-group">' +
-                    '<label class="col-form-label col-sm-12" for="note_details">Other Details <span class="text-danger">*</span></label>' +
+                    '<div class="form-group mb-0">' +
+                    '<label class="col-form-label col-sm-12" for="note_details_' + applicantID + '_' + saleID +
+                    '">Other Details <span class="text-danger" data-details-required-indicator>*</span></label>' +
                     '<div class="col-sm-12">' +
-                    '<textarea name="details" id="note_details" class="form-control" cols="30" rows="4" placeholder="Type here ..." required></textarea>' +
+                    '<textarea name="details" id="note_details_' + applicantID + '_' + saleID +
+                    '" class="form-control" cols="30" rows="4" placeholder="Type here ..." required></textarea>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
                     '</div>' +
                     '</div>' +
                     '</form>' +
                     '</div>' +
                     '<div class="modal-footer">' +
                     '<button type="button" class="btn btn-dark" data-bs-dismiss="modal">Cancel</button>' +
+                    '<button type="button" class="btn btn-outline-secondary d-none" id="backCVBtn_' + applicantID +
+                    '_' + saleID + '">Back</button>' +
                     '<button type="button" class="btn btn-success" id="saveCVBtn_' + applicantID + '_' + saleID +
-                    '">Save</button>' +
+                    '">Next</button>' +
                     '</div>' +
                     '</div>' +
                     '</div>' +
                     '</div>'
                 );
+                const formElement = $('#' + formID);
+                const pageOne = formElement.find('[data-send-cv-page="1"]');
+                const pageTwo = formElement.find('[data-send-cv-page="2"]');
+                const submitButton = $('#saveCVBtn_' + applicantID + '_' + saleID);
+                const backButton = $('#backCVBtn_' + applicantID + '_' + saleID);
+                const hangupCall = formElement.find('[name="hangup_call"]');
+                const noJob = formElement.find('[name="no_job"]');
+                const detailsField = formElement.find('[name="details"]');
+                let currentPage = 1;
+                const isShortcutSubmission = function() {
+                    return hangupCall.is(':checked') || noJob.is(':checked');
+                };
+
+                const showPageOne = function() {
+                    currentPage = 1;
+                    pageOne.removeClass('d-none');
+                    pageTwo.addClass('d-none');
+                    backButton.addClass('d-none');
+                    submitButton.text(isShortcutSubmission() ? 'Submit' : 'Next');
+                };
+                const showPageTwo = function() {
+                    currentPage = 2;
+                    pageOne.addClass('d-none');
+                    pageTwo.removeClass('d-none');
+                    backButton.removeClass('d-none');
+                    submitButton.text('Submit');
+                };
+                const updateShortcutNavigation = function() {
+                    const isShortcut = isShortcutSubmission();
+                    detailsField.prop('required', !isShortcut);
+                    formElement.find('[data-details-required-indicator]')
+                        .toggleClass('d-none', isShortcut);
+                    if (isShortcut) {
+                        showPageOne();
+                        pageTwo.find('.is-invalid').removeClass('is-invalid');
+                        pageTwo.find('.invalid-feedback').remove();
+                    } else if (currentPage === 2) {
+                        submitButton.text('Submit');
+                    } else {
+                        submitButton.text('Next');
+                    }
+                };
+
+                backButton.off('click').on('click', showPageOne);
+                formElement.off('change', '[name="category"]').on('change', '[name="category"]', function() {
+                    updateNurseFields();
+                    formElement.find('[data-category-error]').addClass('d-none');
+                });
+                formElement.off('change', '[name="no_job"], [name="hangup_call"]').on('change',
+                    '[name="no_job"], [name="hangup_call"]',
+                    function() {
+                        if (this.checked) {
+                            formElement.find('[name="no_job"], [name="hangup_call"]').not(this).prop('checked', false);
+                        }
+                        updateShortcutNavigation();
+                    });
+
                 // Handle save button click - using event delegation
                 $(document).off('click', '#saveCVBtn_' + applicantID + '_' + saleID).on('click', '#saveCVBtn_' +
                     applicantID + '_' + saleID,
                     function() {
                         const form = $('#' + formID);
+                        const isHangupCall = hangupCall.is(':checked');
+                        const isShortcut = isShortcutSubmission();
+                        if (!isShortcut && currentPage === 1) {
+                            showPageTwo();
+                            return;
+                        }
+
                         const notes = form.find('[name="details"]').val();
                         let isValid = true;
 
@@ -1271,26 +1927,47 @@
                         form.find('.is-invalid').removeClass('is-invalid');
                         form.find('.invalid-feedback').remove();
 
+                        if (!isShortcut && !form.find('[name="category"]:checked').length) {
+                            form.find('[data-category-error]').removeClass('d-none');
+                            isValid = false;
+                        }
+
                         // Validate required fields
-                        if (!notes) {
+                        if (!isShortcut && !notes) {
                             form.find('[name="details"]').addClass('is-invalid')
                                 .after('<div class="invalid-feedback">Please enter note details.</div>');
                             isValid = false;
                         }
 
+                        if (!isShortcut) {
+                            ['interview_option_1', 'interview_option_2'].forEach(function(fieldName) {
+                                const field = form.find('[name="' + fieldName + '"]');
+                                if (!field.val()) {
+                                    field.addClass('is-invalid')
+                                        .after('<div class="invalid-feedback">Please select ' +
+                                            (fieldName === 'interview_option_1' ?
+                                                'Interview Availability Same Week.' :
+                                                'Interview Availability Next Week.') +
+                                            '</div>');
+                                    isValid = false;
+                                }
+                            });
+                        }
+
                         // Validate at least one transport type is selected
-                        if (form.find('[name="transport_type[]"]:checked').length === 0) {
-                            form.find('[name="transport_type[]"]').first().closest('.form-group').find('.col-sm-9')
+                        if (!isShortcut && form.find('[name="transport_type[]"]:checked').length === 0) {
+                            form.find('[name="transport_type[]"]').first().closest('.col-12')
                                 .append(
                                     '<div class="invalid-feedback d-block">Please select at least one transport type.</div>'
                                 );
                             isValid = false;
                         }
 
-                        // Validate visa status is selected
-                        if (!form.find('[name="visa_status"]:checked').val()) {
-                            form.find('[name="visa_status"]').first().closest('.form-group').find('.col-sm-9')
-                                .append('<div class="invalid-feedback d-block">Please select visa status.</div>');
+                        // Validate visa status is provided
+                        const visaStatus = form.find('[name="visa_status"]');
+                        if (!isShortcut && !visaStatus.val().trim()) {
+                            visaStatus.addClass('is-invalid')
+                                .after('<div class="invalid-feedback">Please enter visa status.</div>');
                             isValid = false;
                         }
 
@@ -1307,12 +1984,21 @@
 
                         // Submit form via AJAX
                         $.ajax({
-                            url: '{{ route('sendCVtoQuality') }}',
+                            url: isShortcut ? '{{ route('saveSendCvHangupNote') }}' :
+                                '{{ route('sendCVtoQuality') }}',
                             type: 'POST',
                             data: form.serialize(),
                             success: function(response) {
                                 if (response.success) {
                                     toastr.success(response.message || 'CV sent successfully!');
+                                    if (response.download_url) {
+                                        const downloadLink = document.createElement('a');
+                                        downloadLink.href = response.download_url;
+                                        downloadLink.download = '';
+                                        document.body.appendChild(downloadLink);
+                                        downloadLink.click();
+                                        downloadLink.remove();
+                                    }
                                     $('#' + modalID).modal('hide');
                                     $('#applicants_table').DataTable().ajax.reload();
                                 } else {
@@ -1337,7 +2023,16 @@
 
             // Reset form when modal shows
             $('#' + modalID).on('show.bs.modal', function() {
-                $(this).find('form')[0].reset();
+                const form = $(this).find('form');
+                form[0].reset();
+                form.find('[data-send-cv-page="1"]').removeClass('d-none');
+                form.find('[data-send-cv-page="2"]').addClass('d-none');
+                form.find('[name="details"]').prop('required', true);
+                form.find('[data-details-required-indicator]').removeClass('d-none');
+                form.find('[data-category-error]').addClass('d-none');
+                updateNurseFields();
+                $('#backCVBtn_' + applicantID + '_' + saleID).addClass('d-none');
+                $('#saveCVBtn_' + applicantID + '_' + saleID).text('Next');
                 $(this).find('.is-invalid').removeClass('is-invalid');
                 $(this).find('.invalid-feedback').remove();
             });
@@ -1828,9 +2523,8 @@
             appendSelectedIds('source_filter', '.source-filter', 'source-id');
 
             // Same job titles the table is filtered by (taken from its last request).
-            const tableParams = $.fn.DataTable.isDataTable('#applicants_table')
-                ? ($('#applicants_table').DataTable().ajax.params() || {})
-                : {};
+            const tableParams = $.fn.DataTable.isDataTable('#applicants_table') ?
+                ($('#applicants_table').DataTable().ajax.params() || {}) : {};
             url.searchParams.delete('title_filter[]');
             url.searchParams.delete('title_filter');
             [].concat(tableParams.title_filter || []).forEach(function(id) {

@@ -1,13 +1,4 @@
 @extends('layouts.vertical', ['title' => 'Sales List', 'subTitle' => 'Sales'])
-@section('css')
-    <style>
-        /* Blacklisted rows: table-danger background plus a red bar on the left edge. */
-        tr.blacklisted-row > td:first-child {
-            box-shadow: inset 4px 0 0 var(--bs-danger),
-                inset 0 0 0 9999px var(--bs-table-bg-state, var(--bs-table-bg-type, var(--bs-table-accent-bg)));
-        }
-    </style>
-@endsection
 @section('style')
     <style>
         .dropdown-toggle::after {
@@ -796,12 +787,6 @@
                     },
                     {
                         targets: 14, // Column index for 'cv_limit'
-                        createdCell: function(td, cellData, rowData, row, col) {
-                            $(td).css('text-align', 'center'); // Center the text in this column
-                        }
-                    },
-                    {
-                        targets: 17, // Column index for 'status'
                         createdCell: function(td, cellData, rowData, row, col) {
                             $(td).css('text-align', 'center'); // Center the text in this column
                         }
