@@ -950,6 +950,9 @@
                 range: range,
                 date_range: dateRange
             }, function(response) {
+                // The first call runs before the chart is created (it loads again right after
+                // chart.render()); a fast answer used to hit an undefined chart.
+                if (!chart) return;
                 if (response.series?.length) {
                     chart.updateOptions({
                         labels: response.labels
