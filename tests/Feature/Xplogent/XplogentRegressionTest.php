@@ -67,11 +67,11 @@ class XplogentRegressionTest extends XplogentTestCase
 
         $page = $this->actingAs($this->staff('Jane Recruiter', 'email-index'))
             ->get('/send-email-to-applicant?sale_id=' . $sale->id)->assertOk()->viewData('formattedMessage');
-        $this->assertStringContainsString('Care at Elm Lodge, Full time, LS6', $page);
+        $this->assertStringContainsString('Care at Elm Lodge, Full Time, LS6', $page);
 
         $id = $this->signed('/api/xplogent/send-job-details', ['applicant_id' => $this->applicant()->id,
             'sale_id' => $sale->id, 'email' => 'sarah@example.org', 'call_id' => 3])->assertOk()->json('sent_email_id');
-        $this->assertStringContainsString('Care at Elm Lodge, Full time, LS6', SentEmail::find($id)->template);
+        $this->assertStringContainsString('Care at Elm Lodge, Full Time, LS6', SentEmail::find($id)->template);
     }
 
     public function test_bulk_vacancy_email_skips_blocked_no_job_and_callback_applicants(): void

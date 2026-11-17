@@ -18,6 +18,8 @@
     # checks, never as files.
     RewriteRule ^uploads/resume/ - [R=404,L]
     RewriteRule ^uploads/docs/ - [R=404,L]
+    RewriteRule ^uploads/synopsisForms/ - [R=404,L]
+    RewriteRule ^uploads/drafts/ - [R=404,L]
 
     # Send Requests To Front Controller...
     RewriteCond %{REQUEST_FILENAME} !-d

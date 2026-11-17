@@ -6,6 +6,7 @@ use App\Exceptions\ActionRefusedException;
 use App\Services\Xplogent\ApplicantStatusService;
 use Illuminate\Http\Request;
 use App\Support\CvStorage;
+use App\Support\SynopsisFormStorage;
 
 // Import necessary models
 use Horsefly\Sale;
@@ -2569,7 +2570,7 @@ class ApplicantController extends Controller
                 // so the transaction is never left open)
                 DB::rollBack();
                 if ($questionnaireDocumentPath) {
-                    File::delete(public_path($questionnaireDocumentPath));
+                    SynopsisFormStorage::delete($questionnaireDocumentPath);
                 }
 
                 Log::error('Transaction failed in sendCVtoQuality', [
@@ -2636,41 +2637,18 @@ class ApplicantController extends Controller
 
     public function downloadApplicantDraftFile(ApplicantsSynopsisForm $synopsisForm): \Symfony\Component\HttpFoundation\BinaryFileResponse
     {
-        $relativePath = $synopsisForm->file_url;
-        $allowedDirectories = [
-            'uploads/synopsisForms' => public_path('uploads/synopsisForms'),
-            'uploads/drafts' => public_path('uploads/drafts'),
-        ];
-        $draftDirectory = null;
-        foreach ($allowedDirectories as $relativeDirectory => $absoluteDirectory) {
-            if (is_string($relativePath) && str_starts_with($relativePath, $relativeDirectory . '/')) {
-                $draftDirectory = realpath($absoluteDirectory);
-                break;
-            }
-        }
-
-        abort_unless(
-            $draftDirectory !== false && $draftDirectory !== null,
-            404,
-            'The synopsis form was not found.'
-        );
-
-        $filePath = realpath(public_path($relativePath));
-        abort_unless(
-                $filePath !== false &&
-                str_starts_with(
-                    strtolower($filePath),
-                    strtolower($draftDirectory . DIRECTORY_SEPARATOR)
-                ) &&
-                is_file($filePath),
-            404,
-            'The synopsis form was not found.'
-        );
+        // Private storage, or (until synopsis:move-to-private) the two old public folders only.
+        $filePath = SynopsisFormStorage::existingPath($synopsisForm->file_url);
+        abort_if($filePath === null, 404, 'The synopsis form was not found.');
 
         return response()->download(
             $filePath,
-            basename($filePath),
-            ['Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+            SynopsisFormStorage::downloadName($synopsisForm->applicant?->applicant_name, $synopsisForm->created_at,
+                (int) $synopsisForm->id),
+            [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'Cache-Control' => 'private, no-store',
+            ]
         );
     }
 
@@ -2891,18 +2869,9 @@ class ApplicantController extends Controller
             }
         }
 
-        $applicantName = trim((string) $applicant->applicant_name);
-        $applicantName = $applicantName === '' ? 'applicant-' . $applicant->id : ucwords(strtolower($applicantName));
-        $generatedAt = Carbon::now();
-        $applicantFileName = Str::slug($applicantName) ?: 'applicant-' . $applicant->id;
-        $documentPath = implode('/', [
-            'uploads',
-            'synopsisForms',
-            $generatedAt->format('Y'),
-            $generatedAt->format('m'),
-            $generatedAt->format('d'),
-            $applicantFileName . '_' . $generatedAt->format('Ymd_His_u') . '.docx',
-        ]);
+        // Personal data (visa, DBS convictions, salary): kept outside the web root, under a
+        // random name, and served only by the download routes (SynopsisFormStorage).
+        $documentPath = SynopsisFormStorage::newPrivatePath('docx');
         $temporaryPath = tempnam(sys_get_temp_dir(), 'cv-questionnaire-');
         if ($temporaryPath === false) {
             throw new \RuntimeException('Unable to prepare the questionnaire Word document.');
@@ -2915,8 +2884,8 @@ class ApplicantController extends Controller
                 throw new \RuntimeException('Unable to save the questionnaire Word document.');
             }
 
-            $fullDocumentPath = public_path($documentPath);
-            File::ensureDirectoryExists(dirname($fullDocumentPath));
+            $fullDocumentPath = SynopsisFormStorage::fullPath($documentPath);
+            File::ensureDirectoryExists(dirname($fullDocumentPath), 0750);
             if (File::put($fullDocumentPath, $documentContents) === false) {
                 throw new \RuntimeException('Unable to save the questionnaire Word document.');
             }

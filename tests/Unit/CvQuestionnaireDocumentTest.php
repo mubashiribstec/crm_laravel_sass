@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Http\Controllers\ApplicantController;
+use App\Support\SynopsisFormStorage;
 use DOMDocument;
 use Horsefly\Applicant;
 use Horsefly\Sale;
@@ -55,7 +56,8 @@ class CvQuestionnaireDocumentTest extends TestCase
 
         $method = new ReflectionMethod(ApplicantController::class, 'createCvQuestionnaireDocument');
         $relativePath = $method->invoke(app(ApplicantController::class), $questionnaire, $applicant, new Sale());
-        $this->generatedPath = public_path($relativePath);
+        $this->generatedPath = SynopsisFormStorage::fullPath($relativePath);
+        $this->assertStringStartsWith(SynopsisFormStorage::PRIVATE_PREFIX, $relativePath);   // never under public/
 
         $zip = new ZipArchive();
         $this->assertTrue($zip->open($this->generatedPath) === true);
