@@ -30,6 +30,11 @@ nothing to do with the xplosip / MicroSIP caller-ID routes in `routes/api.php`.
 
 4. Give staff the `xplogent-agent-call` permission so they can use the page. Add
    `xplogent-view-transcript` for those who may read call transcripts.
+   - No role gets these automatically, not even the admin role, so until you tick them the
+     **Agent Call (AI)** menu (under Dashboard) is hidden for everyone.
+   - Where: Roles & Permissions → edit the role → group **xplogent** → tick → Save. Then
+     `php artisan permission:cache-reset` and sign in again.
+   - `php artisan xplogent:check` says who has it, or that nobody does.
 5. Check both directions:
    - in Xplogent, press Calls → Call agent → CRM → **Test connection**;
    - here, run `php artisan xplogent:check`.

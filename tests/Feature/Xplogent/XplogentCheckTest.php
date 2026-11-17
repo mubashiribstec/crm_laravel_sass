@@ -6,6 +6,9 @@ use App\Support\Xplogent;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 
 /** The CRM -> Xplogent direction: php artisan xplogent:check and the page's Test connection. */
 class XplogentCheckTest extends XplogentTestCase
@@ -76,5 +79,33 @@ class XplogentCheckTest extends XplogentTestCase
             'sale_id' => $sale->id])->assertStatus(502);
         $this->assertStringContainsString("Can't reach Xplogent", $r->json('error'));
         $this->assertStringContainsString('xplogent-docker local --lan', $r->json('error'));
+    }
+
+    public function test_it_says_when_nobody_can_see_the_agent_call_menu(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true, 'test' => true, 'agent_enabled' => true])]);
+
+        // After migrate the permission exists, but no role has it: the menu is hidden for everyone.
+        $this->artisan('xplogent:check')
+            ->expectsOutputToContain('Nobody has xplogent-agent-call')
+            ->expectsOutputToContain('Roles & Permissions')
+            ->assertExitCode(0);
+
+        // Given to a role with a user: the check names the role.
+        $role = Role::create(['name' => 'Recruiter', 'guard_name' => 'web']);
+        $role->givePermissionTo('xplogent-agent-call');
+        $this->staff('Jane Recruiter')->assignRole($role);
+        $this->artisan('xplogent:check')
+            ->expectsOutputToContain('Agent Call (AI) menu: 1 user(s) (roles: Recruiter)')
+            ->doesntExpectOutputToContain('Nobody has')
+            ->assertExitCode(0);
+
+        // Migrations not run on this server yet.
+        Permission::where('name', 'xplogent-agent-call')->delete();
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $this->artisan('xplogent:check')
+            ->expectsOutputToContain("xplogent-agent-call doesn't exist yet")
+            ->expectsOutputToContain('php artisan migrate --force')
+            ->assertExitCode(0);
     }
 }
