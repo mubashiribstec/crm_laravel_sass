@@ -32,7 +32,9 @@ else
     [ -e "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ] && { echo "$APP_DIR exists and is not a git clone; not touching it." >&2; exit 1; }
     git clone --branch "$BRANCH" "$REPO" "$APP_DIR"
   fi
-  exec bash "$APP_DIR/deploy/install.sh" "$@" </dev/tty
+  # Piped through curl, stdin is the script: read answers from the terminal when there is one.
+  if (exec </dev/tty) 2>/dev/null; then exec bash "$APP_DIR/deploy/install.sh" "$@" </dev/tty; fi
+  exec bash "$APP_DIR/deploy/install.sh" "$@" </dev/null
 fi
 
 trap on_error ERR
