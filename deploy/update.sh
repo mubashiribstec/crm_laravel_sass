@@ -83,7 +83,7 @@ build_assets
 
 # ── 3. Database ───────────────────────────────────────────────────────────────────────────────
 step "Database"
-artisan optimize:clear >/dev/null
+clear_compiled
 PENDING="$(artisan migrate:status --pending 2>/dev/null | grep -c 'Pending' || true)"
 if [ "$PENDING" -gt 0 ]; then
   ok "$PENDING new migration(s): $(artisan migrate:status --pending 2>/dev/null | awk '/Pending/ {print $1}' | tr '\n' ' ')"
@@ -125,6 +125,7 @@ step "Folders, scheduler and caches"
 fix_writable
 ensure_storage_link
 ensure_cron
+artisan optimize:clear >/dev/null
 artisan optimize >/dev/null && ok "caches rebuilt"
 fix_writable
 artisan up >/dev/null 2>&1 && ok "site is live"

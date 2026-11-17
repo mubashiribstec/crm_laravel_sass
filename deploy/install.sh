@@ -13,6 +13,7 @@
 #   CRM_DB_USER=crm  CRM_DB_PASS=...  CRM_IP_PREFIXES=192.168.1,127.0.0  CRM_SEED=yes|no
 #   CRM_SKIP_PACKAGES=1 (skip apt)  CRM_SKIP_APACHE=1 (leave Apache config alone)
 set -Eeuo pipefail
+umask 022
 
 REPO="${CRM_REPO:-https://github.com/mubashiribstec/crm_laravel_sass.git}"
 BRANCH="${CRM_BRANCH:-main}"
@@ -111,6 +112,7 @@ done
 ok "PHP extensions present"
 
 prepare_owner
+chmod -R o-w "$APP_DIR" && ok "no world-writable files in $APP_DIR"
 
 # ── 3. Database ───────────────────────────────────────────────────────────────────────────────
 if [ "$EXISTING_ENV" = 0 ]; then
@@ -177,7 +179,7 @@ ensure_storage_link
 
 # ── 6. Database schema ────────────────────────────────────────────────────────────────────────
 step "Database schema"
-artisan optimize:clear >/dev/null
+clear_compiled
 artisan migrate --force
 USERS="$(cd "$APP_DIR" && runuser -u "$WEB_USER" -- php artisan tinker --execute='echo \DB::table("users")->count();' 2>/dev/null | tail -1)"
 ADMIN_PASS=""
@@ -224,6 +226,7 @@ ensure_cron
 
 # ── 8. Caches and checks ──────────────────────────────────────────────────────────────────────
 step "Caches"
+artisan optimize:clear >/dev/null
 artisan optimize >/dev/null && ok "config, routes, views and events cached"
 fix_writable
 

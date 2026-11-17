@@ -2,6 +2,7 @@
 # Shared helpers for deploy/install.sh and deploy/update.sh. Sourced, not run.
 # Nothing here prints a secret: values read from .env are only passed to programs, never echoed.
 
+umask 022                       # new files: not group/world-writable unless set below
 WEB_USER="${CRM_WEB_USER:-www-data}"
 CRON_FILE="/etc/cron.d/crm-laravel"
 LOG_FILE="${CRM_LOG_FILE:-/var/log/crm-deploy.log}"
@@ -16,6 +17,7 @@ WARNINGS=()
 
 on_error() {
   local code=$?
+  [ "${BASH_SUBSHELL:-0}" -gt 0 ] && exit "$code"     # report once, from the main script
   printf '\n%s✗ Failed during: %s (exit %s).%s\n  Full output: %s\n' "$R" "${STEP:-setup}" "$code" "$N" "$LOG_FILE" >&2
   exit "$code"
 }
@@ -61,6 +63,9 @@ as_owner() {
   fi
 }
 artisan() { (cd "$APP_DIR" && runuser -u "$WEB_USER" -- php artisan "$@"); }
+# Before migrating: drop compiled config/routes/views/events only. optimize:clear would also empty
+# the cache store, which is a database table that doesn't exist yet on a new database.
+clear_compiled() { local c; for c in config:clear route:clear view:clear event:clear; do artisan "$c" >/dev/null; done; }
 git_app() { git -c safe.directory="$APP_DIR" -C "$APP_DIR" "$@"; }
 
 prepare_owner() {
