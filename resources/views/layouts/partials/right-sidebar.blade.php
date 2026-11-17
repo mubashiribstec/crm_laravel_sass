@@ -53,35 +53,51 @@
 
     <div class="offcanvas-body d-flex flex-column p-0">
         <!-- Email Form -->
-        <form id="emailForm" class="flex-grow-1 d-flex flex-column">
+        @php
+            $signatureSettings = DB::table('settings')
+                ->where('group', 'signature')
+                ->pluck('value', 'key');
+        @endphp
+        <form id="emailForm" class="flex-grow-1 d-flex flex-column"
+            data-sender-pseudo-name="{{ auth()->user()->pseudo_name ?? auth()->user()->name ?? '' }}"
+            data-logo-url="{{ asset('images/Kingsbury-Personnel-Logo.png') }}"
+            data-signature-image="{{ $signatureSettings->get('email_signature_image', '') }}"
+            data-signature-company-name="{{ $signatureSettings->get('email_signature_company_name', '') }}"
+            data-signature-phone="{{ $signatureSettings->get('email_signature_phone', '') }}"
+            data-signature-email="{{ $signatureSettings->get('email_signature_email', '') }}">
             @csrf
             <input type="hidden" id="emailapplicantId" name="applicant_id">
+            <input type="hidden" id="emailSaleId" name="sale_id">
 
             <!-- Header Section -->
             <div class="p-3 border-bottom bg-light">
-                <div class="mb-3">
-                    @php
-                        $fromEmails = DB::table('smtp_settings')->whereNotNull('from_address')->get();
-                    @endphp
-
-                    <label for="fromEmail" class="form-label fw-semibold">From
-                    </label>
-                    <select class="form-control" name="fromEmail" id="fromEmail" required>
-                        <option value="">Select From Email</option>
-                        @foreach($fromEmails as $from)
-                            <option value="{{ $from->from_address }}">{{ $from->from_address }}</option>
-                        @endforeach
-                    </select>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        @php
+                            $primaryEmail = DB::table('settings')->where('key', 'primary_email_address')->value('value')
+                                ?: 'info@kingsburypersonnel.com';
+                        @endphp
+                        <label for="fromEmail" class="form-label fw-semibold">From</label>
+                        <input type="email" class="form-control" name="fromEmail" id="fromEmail"
+                            value="{{ $primaryEmail }}" readonly required>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="emailTo" class="form-label fw-semibold">To</label>
+                        <select class="form-select" id="emailTo" name="to" required>
+                            <option value="">Select applicant email</option>
+                        </select>
+                    </div>
                 </div>
+
                 <div class="mb-3">
-                    <label for="emailTo" class="form-label fw-semibold">To
-                    </label>
-                    <input 
-                        type="email" 
-                        class="form-control" 
-                        id="emailTo" 
-                        name="to" 
-                        placeholder="recipient@example.com" 
+                    <label for="emailTitle" class="form-label fw-semibold">Email title</label>
+                    <input
+                        type="text"
+                        class="form-control"
+                        id="emailTitle"
+                        name="email_title"
+                        maxlength="191"
+                        placeholder="Enter email title"
                         required>
                 </div>
 
@@ -93,6 +109,7 @@
                         class="form-control" 
                         id="emailSubject" 
                         name="subject" 
+                        maxlength="191"
                         placeholder="Enter email subject" 
                         required>
                 </div>
@@ -109,7 +126,7 @@
                         id="emailBody"
                         class="form-control border-0 p-3 shadow-none summernote"
                         placeholder="Write your email message here..."
-                        style="resize:none; min-height:250px;">
+                        style="resize:none; min-height:270px;">
                     </textarea>
 
                     </div>
@@ -139,9 +156,9 @@
         bottom: 0;
         top: auto;
         right: 0;
-        width: 20%;
-        max-width: 20%;
-        height: 700px;
+        width: 50%;
+        max-width: 50%;
+        height: 850px;
         transform: translateX(100%);
         border-left: 1px solid rgba(0, 0, 0, .1);
         box-shadow: -5px 0 15px rgba(0, 0, 0, 0.1), 0 -5px 15px rgba(0, 0, 0, 0.1);
@@ -153,9 +170,9 @@
         bottom: 0;
         top: auto;
         right: 0;
-        width: 30%;
-        max-width: 30%;
-        height: 700px;
+        width: 50%;
+        max-width: 50%;
+        height: 850px;
         transform: translateX(100%);
         border-left: 1px solid rgba(0, 0, 0, .1);
         box-shadow: -5px 0 15px rgba(0, 0, 0, 0.1), 0 -5px 15px rgba(0, 0, 0, 0.1);

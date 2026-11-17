@@ -677,7 +677,7 @@
                                                     <label class="form-check-label" for="day">Day</label>
                                                 </div>
                                                 <div class="form-check form-check-inline">
-                                                    <input class="form-check-input" type="checkbox" name="shit_pattern[]" id="night" value="Night">
+                                                    <input class="form-check-input" type="checkbox" name="shift_pattern[]" id="night" value="Night">
                                                     <label class="form-check-label" for="night">Night</label>
                                                 </div>
                                                 <div class="form-check form-check-inline ml-3">

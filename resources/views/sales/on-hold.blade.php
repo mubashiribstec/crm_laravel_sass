@@ -14,19 +14,8 @@
         <div class="col-lg-12">
             <div class="card">
                 <div class="card-header border-0">
-                    <div class="row justify-content-between">
-                        <div class="col-lg-3">
-                            <div class="text-md-start mt-3 pt-1">
-                                <div class="input-group">
-                                    <div class="position-relative flex-grow-1" style="display: flex;">
-                                        <input type="text" id="customSearchInput" class="form-control w-100" placeholder="Search ...">
-                                        <button class="d-none" id="customClearBtn" type="button" title="Clear"><i class="ri-close-line"></i></button>
-                                    </div>
-                                    <button class="btn btn-primary" id="customSearchBtn" type="button"><i class="ri-search-line"></i> Search</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-9">
+                    <div class="row justify-content-end">
+                        <div class="col-lg-12">
                             <div class="text-md-end mt-3">
                                 <!-- user Filter Dropdown -->
                                 <div class="dropdown d-inline">
@@ -192,8 +181,26 @@
                                         <a class="dropdown-item cv-limit-filter" href="#">Max</a>
                                     </div>
                                 </div>
+                                <!-- Blacklisted only checkbox -->
+                                <label class="btn btn-outline-primary me-1 my-1 mb-1" for="blacklistedOnlyFilter">
+                                    <input class="form-check-input mt-0 me-1" type="checkbox" id="blacklistedOnlyFilter" autocomplete="off">
+                                    Blacklisted only
+                                </label>
                             </div>
                         </div><!-- end col-->
+                    </div>
+                    <div class="row justify-content-start">
+                        <div class="col-lg-3">
+                            <div class="text-md-start mt-3 pt-1">
+                                <div class="input-group">
+                                    <div class="position-relative flex-grow-1" style="display: flex;">
+                                        <input type="text" id="customSearchInput" class="form-control w-100" placeholder="Search ...">
+                                        <button class="d-none" id="customClearBtn" type="button" title="Clear"><i class="ri-close-line"></i></button>
+                                    </div>
+                                    <button class="btn btn-primary" id="customSearchBtn" type="button"><i class="ri-search-line"></i> Search</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -204,6 +211,21 @@
         <div class="col-xl-12">
             <div class="card">
                 <div class="card-body p-3">
+                    <!-- Columns Visibility Dropdown — moved via JS (initComplete) next to the "Show X entries" control. -->
+                    <div id="columnsToolbar" class="dropdown d-inline">
+                        <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button"
+                            id="dropdownMenuColumns" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="ri-layout-column-line me-1"></i> Columns
+                        </button>
+                        <div class="dropdown-menu filter-dropdowns p-2" aria-labelledby="dropdownMenuColumns"
+                            style="min-width: 230px;">
+                            <div class="d-flex justify-content-between align-items-center px-1 mb-2">
+                                <a href="#" id="columnsSelectAll" class="text-primary small fw-semibold">Show All</a>
+                                <a href="#" id="columnsResetDefault" class="text-secondary small fw-semibold">Reset Default</a>
+                            </div>
+                            <div id="columnsList" style="max-height: 280px; overflow-y: auto;"></div>
+                        </div>
+                    </div>
                     <div class="table-responsive">
                         <table id="sales_table" class="table align-middle mb-3">
                             <thead class="bg-light-subtle">
@@ -308,6 +330,90 @@
                 $('#sales_table tbody').empty().append(loadingRow);
             }
 
+            // Column visibility (show/hide columns) — same pattern as sales/open.
+            // Each index MUST line up with the <thead> markup and the `columns:` array below.
+            const columnConfig = [
+                { title: '#', toggleable: false },
+                { title: 'Created Date', default: true },
+                { title: 'Hold Date', default: true },
+                { title: 'Agent', default: true },
+                { title: 'Head Office', default: true },
+                { title: 'Unit Name', default: false },
+                { title: 'PostCode', default: true },
+                { title: 'Position Type', default: false },
+                { title: 'Title', default: true },
+                { title: 'Category', default: true },
+                { title: 'Experience', default: false },
+                { title: 'Qualification', default: false },
+                { title: 'Salary', default: false },
+                { title: 'CV Limit', default: true },
+                { title: 'Notes', default: true },
+                { title: 'Status', default: true },
+                { title: 'Action', toggleable: false },
+            ];
+
+            const COLUMN_VISIBILITY_STORAGE_KEY = 'on_hold_sales_table_column_visibility_v1';
+
+            function loadColumnVisibility() {
+                let stored = {};
+                try {
+                    stored = JSON.parse(localStorage.getItem(COLUMN_VISIBILITY_STORAGE_KEY)) || {};
+                } catch (e) {
+                    stored = {};
+                }
+
+                return columnConfig.map(function(col, index) {
+                    if (col.toggleable === false) {
+                        return true;
+                    }
+                    return stored.hasOwnProperty(index) ? !!stored[index] : !!col.default;
+                });
+            }
+
+            function saveColumnVisibility(visibilityByIndex) {
+                const toStore = {};
+                columnConfig.forEach(function(col, index) {
+                    if (col.toggleable !== false) {
+                        toStore[index] = !!visibilityByIndex[index];
+                    }
+                });
+                localStorage.setItem(COLUMN_VISIBILITY_STORAGE_KEY, JSON.stringify(toStore));
+            }
+
+            let columnVisibility = loadColumnVisibility();
+
+            function renderColumnsDropdown() {
+                const $list = $('#columnsList');
+                $list.empty();
+
+                columnConfig.forEach(function(col, index) {
+                    if (col.toggleable === false) {
+                        return;
+                    }
+
+                    const checked = columnVisibility[index] ? 'checked' : '';
+                    $list.append(`
+                        <div class="form-check">
+                            <input class="form-check-input column-toggle" type="checkbox"
+                                id="column_${index}" data-column-index="${index}" ${checked}>
+                            <label class="form-check-label" for="column_${index}">${col.title}</label>
+                        </div>
+                    `);
+                });
+            }
+
+            renderColumnsDropdown();
+
+            function getHiddenColumnIndices() {
+                return columnVisibility
+                    .map(function(visible, index) {
+                        return visible ? null : index;
+                    })
+                    .filter(function(index) {
+                        return index !== null;
+                    });
+            }
+
             // Initialize DataTable with server-side processing
             var table = $('#sales_table').DataTable({
                 processing: false,  // Disable default processing state
@@ -322,6 +428,7 @@
                         d.title_filter = currentTitleFilters;  // Send the current filter value as a parameter
                         d.office_filter = currentOfficeFilters;  // Send the current filter value as a parameter
                         d.user_filter = currentUserFilters;  // Send the current filter value as a parameter
+                        d.blacklist_filter = $('#blacklistedOnlyFilter').is(':checked') ? 1 : 0;
                         d.cv_limit_filter = currentCVLimitFilter;  // Send the current filter value as a parameter
                     },
                     beforeSend: function() {
@@ -375,12 +482,24 @@
                         createdCell: function (td, cellData, rowData, row, col) {
                             $(td).css('text-align', 'center');  // Center the text in this column
                         }
+                    },
+                    {
+                        // Applies the saved/default column visibility on the very first draw
+                        targets: getHiddenColumnIndices(),
+                        visible: false
                     }
                 ],
                 rowId: function(data) {
                     return 'row_' + data.id; // Assign a unique ID to each row using the 'id' field from the data
                 },
-                dom: 'lrtip',  // Change the order to 'filter' (f), 'length' (l), 'table' (r), 'pagination' (p), and 'information' (i)
+                // Length control in its own flex row so the "Columns" button can sit beside it
+                dom: '<"d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2"l>rtip',
+                initComplete: function() {
+                    const api = this.api();
+                    $(api.table().container())
+                        .find('.dataTables_length')
+                        .after($('#columnsToolbar'));
+                },
                 drawCallback: function (settings) {
                     const api = this.api();
                     const pagination = $(api.table().container()).find('.dataTables_paginate');
@@ -457,6 +576,57 @@
                     pagination.html(paginationHtml);
                 },
             });
+
+            // Column visibility dropdown handlers
+            $(document).on('change', '.column-toggle', function() {
+                const index = parseInt($(this).data('column-index'), 10);
+                const visible = $(this).is(':checked');
+
+                columnVisibility[index] = visible;
+                table.column(index).visible(visible);
+                saveColumnVisibility(columnVisibility);
+            });
+
+            $('#columnsSelectAll').on('click', function(e) {
+                e.preventDefault();
+
+                columnConfig.forEach(function(col, index) {
+                    if (col.toggleable !== false) {
+                        columnVisibility[index] = true;
+                    }
+                });
+
+                table.columns().every(function() {
+                    const index = this.index();
+                    if (columnConfig[index].toggleable !== false) {
+                        this.visible(true);
+                    }
+                });
+
+                saveColumnVisibility(columnVisibility);
+                renderColumnsDropdown();
+            });
+
+            $('#columnsResetDefault').on('click', function(e) {
+                e.preventDefault();
+
+                columnConfig.forEach(function(col, index) {
+                    if (col.toggleable !== false) {
+                        columnVisibility[index] = !!col.default;
+                    }
+                });
+
+                table.columns().every(function() {
+                    const index = this.index();
+                    if (columnConfig[index].toggleable !== false) {
+                        this.visible(columnVisibility[index]);
+                    }
+                });
+
+                saveColumnVisibility(columnVisibility);
+                renderColumnsDropdown();
+            });
+
             // Search logic helper
             function handleCustomSearch() {
                 let searchValue = $('#customSearchInput').val().trim();
@@ -502,6 +672,10 @@
 
                 $('#showFilterType').html(formattedText);
                 table.ajax.reload(); // Reload with updated type filter
+            });
+            // Blacklisted only checkbox
+            $('#blacklistedOnlyFilter').on('change', function() {
+                table.ajax.reload();
             });
             // cv limit filter dropdown handler
             $('.cv-limit-filter').on('click', function () {

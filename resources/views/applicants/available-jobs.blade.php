@@ -568,7 +568,7 @@
         }
 
         // Function to send cv modal
-        function sendCVModal(applicantID, saleID, applicantPostcode, applicantNursingHomeExp) {
+        function legacySendCVModal(applicantID, saleID, applicantPostcode, applicantNursingHomeExp) {
             const modalId = `sendCVModal-${applicantID}-${saleID}`;
             const formId = `sendCV_form_${applicantID}_${saleID}`;
             const noteId = `note_details_${applicantID}_${saleID}`;
@@ -641,7 +641,7 @@
                                                     <label class="form-check-label" for="day">Day</label>
                                                 </div>
                                                 <div class="form-check form-check-inline">
-                                                    <input class="form-check-input" type="checkbox" name="shit_pattern[]" id="night" value="Night">
+                                                    <input class="form-check-input" type="checkbox" name="shift_pattern[]" id="night" value="Night">
                                                     <label class="form-check-label" for="night">Night</label>
                                                 </div>
                                                 <div class="form-check form-check-inline ml-3">
@@ -789,6 +789,355 @@
                     }
                 });
             });
+        }
+
+        function sendCVModal(applicantID, saleID) {
+            const modalId = `sendCVModal-${applicantID}-${saleID}`;
+            const formId = `sendCV_form_${applicantID}_${saleID}`;
+            const saveBtnId = `saveCVBtn_${applicantID}_${saleID}`;
+            const backBtnId = `backCVBtn_${applicantID}_${saleID}`;
+            const csrfToken = '{{ csrf_token() }}';
+            const applicantFields = [
+                ['visa_status', '8. Visa Status', 'Enter the applicant’s visa status'],
+                ['dbs_convictions', '9. Convictions on DBS', 'Record the applicant’s statement'],
+                ['expected_hourly_rate', '10. Expected Hourly Rate', 'Enter the expected hourly rate'],
+                ['holidays_booked', '11. Holidays Booked', 'Record any holidays already booked'],
+                ['reasons_for_job_change', '12. Reasons for Job Change', 'Record the applicant’s reasons'],
+                ['nursing_experience_years', '13. Years of Experience as a Nurse', 'Enter years of experience', '13. Years of Experience as a Carer, care assistant or support worker', '13. Years of Experience as a Nursery'],
+                ['nursing_home_experience', '14. Years of Experience as a Nurse in Nursing Home', 'Record the applicant’s nursing home experience', '14. Years of Experience as a Carer, care assistant or support worker', '14. Years of Experience as a nursery day care center'],
+                ['manager_rota', '15. Working According to the Manager’s Rota', 'Record the applicant’s response'],
+                ['current_dbs_status', '16. Current DBS Status', 'Enter the current DBS status'],
+                ['expected_salary', '17. Expected Salary', 'Enter the expected salary'],
+                ['qualification', '18. Qualification', 'Enter the qualification']
+            ];
+            const fieldId = function(name) {
+                return `${name}_${applicantID}_${saleID}`;
+            };
+            const textArea = function(name, label, placeholder, nurseOnly, nonNurseLabel, nurseryLabel) {
+                const id = fieldId(name);
+                const nurseOnlyAttribute = nurseOnly ? ' data-nurse-only' : '';
+                const experienceLabelAttributes = nonNurseLabel ?
+                    ` data-nurse-label="${label}" data-non-nurse-label="${nonNurseLabel}" data-nursery-label="${nurseryLabel}"` : '';
+                return `<div class="col-12 col-md-6" data-send-cv-question${nurseOnlyAttribute}>
+                    <label class="form-label" for="${id}"${experienceLabelAttributes}>${label}</label>
+                    <textarea name="${name}" id="${id}" class="form-control" rows="2" placeholder="${placeholder}"></textarea>
+                </div>`;
+            };
+            const checkboxes = function(name, options) {
+                return options.map(function(option) {
+                    const id = fieldId(`${name}_${option.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`);
+                    return `<div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="${name}[]" id="${id}" value="${option}">
+                        <label class="form-check-label" for="${id}">${option}</label>
+                    </div>`;
+                }).join('');
+            };
+
+            if ($(`#${modalId}`).length === 0) {
+                const clinicalSkills = [
+                    'Wound Care', 'Catheterization', 'Venepuncture', 'PEG Feeding',
+                    'Tracheostomy Care', 'Suctioning', 'Dementia Care', 'Palliative Care'
+                ];
+                const clinicalSkillMarkup = clinicalSkills.map(function(skill) {
+                    const id = fieldId(`clinical_${skill.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`);
+                    return `<div class="col-6 col-md-3"><div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="clinical_skills[]" id="${id}" value="${skill}">
+                        <label class="form-check-label" for="${id}">${skill}</label>
+                    </div></div>`;
+                }).join('');
+                const applicantFieldMarkup = applicantFields.map(function(field) {
+                    return textArea(field[0], field[1], field[2], false, field[3], field[4]);
+                }).join('');
+
+                $('body').append(`
+                    <div class="modal fade" id="${modalId}" tabindex="-1" aria-labelledby="${modalId}Label" aria-hidden="true">
+                        <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-top">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title" id="${modalId}Label">Fill Out Form To Send CV</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <form class="form-horizontal" id="${formId}">
+                                        <input type="hidden" name="applicant_id" value="${applicantID}">
+                                        <input type="hidden" name="sale_id" value="${saleID}">
+                                        <input type="hidden" name="_token" value="${csrfToken}">
+                                        <div data-send-cv-page="2" class="d-none">
+                                            <div class="card border-0 shadow-sm mb-4">
+                                                <div class="card-header bg-light">
+                                                    <h6 class="mb-1">Applicant Information</h6>
+                                                    <small class="text-muted">Add the applicant’s statement for each question.</small>
+                                                </div>
+                                                <div class="card-body">
+                                                    <div class="row g-3">
+                                                      <div class="col-12">
+                                                          <label class="form-label d-block">Category</label>
+                                                          <div class="form-check form-check-inline">
+                                                              <input class="form-check-input" type="radio" name="category" id="${fieldId('category_nurse')}" value="Nurse" checked>
+                                                              <label class="form-check-label" for="${fieldId('category_nurse')}">Nurse</label>
+                                                          </div>
+                                                          <div class="form-check form-check-inline">
+                                                              <input class="form-check-input" type="radio" name="category" id="${fieldId('category_non_nurse')}" value="Non Nurse">
+                                                              <label class="form-check-label" for="${fieldId('category_non_nurse')}">Non Nurse</label>
+                                                          </div>
+                                                          <div class="form-check form-check-inline">
+                                                              <input class="form-check-input" type="radio" name="category" id="${fieldId('category_nursery')}" value="Nursery">
+                                                              <label class="form-check-label" for="${fieldId('category_nursery')}">Nursery</label>
+                                                          </div>
+                                                          <div class="text-danger small d-none" data-category-error>Please select a category.</div>
+                                                      </div>
+                                                      ${textArea('nmc_pin_status', '5. NMC PIN Status', 'Enter the applicant’s NMC PIN status', true)}
+                                                      ${textArea('notice_period', '6. Notice Period', 'Enter the applicant’s notice period')}
+                                                      <div class="col-12" data-send-cv-question data-nurse-only>
+                                                          <label class="form-label d-block">7. Clinical Skills</label>
+                                                          <div class="row g-2">${clinicalSkillMarkup}</div>
+                                                      </div>
+                                                        ${applicantFieldMarkup}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div data-send-cv-page="1">
+                                            <div class="card border-0 shadow-sm mb-4">
+                                                <div class="card-header bg-light">
+                                                    <h6 class="mb-1">Additional Information</h6>
+                                                    <small class="text-muted">Add transport, shift, and availability details.</small>
+                                                </div>
+                                                <div class="card-body">
+                                                    <div class="row g-3">
+                                                        <div class="col-12">
+                                                            <label class="form-label d-block">1. Transport Type</label>
+                                                            <div class="send-cv-questionnaire-options">${checkboxes('transport_type', ['By Walk', 'Cycle', 'Car', 'Public Transport'])}</div>
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <label class="form-label d-block">2. Shift Pattern</label>
+                                                            <div class="send-cv-questionnaire-options">${checkboxes('shift_pattern', ['Day', 'Night', 'Full Time', 'Part Time', '24 hours', 'Day/Night'])}</div>
+                                                        </div>
+                                                        <div class="col-12 col-sm-6">
+                                                            <label class="form-label" for="${fieldId('interview_option_1')}">3. Interview Availability Same Week</label>
+                                                            <input class="form-control" type="datetime-local" name="interview_option_1" id="${fieldId('interview_option_1')}">
+                                                        </div>
+                                                        <div class="col-12 col-sm-6">
+                                                            <label class="form-label" for="${fieldId('interview_option_2')}">4. Interview Availability Next Week</label>
+                                                            <input class="form-control" type="datetime-local" name="interview_option_2" id="${fieldId('interview_option_2')}">
+                                                        </div>
+                                                        <div class="col-12 col-sm-6 my-2">
+                                                            <div class="form-check form-switch">
+                                                                <input class="form-check-input" type="checkbox" name="hangup_call" role="switch" id="${fieldId('hangup_call')}" value="1">
+                                                                <label class="form-check-label" for="${fieldId('hangup_call')}">Call Hung up/Not Interested</label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-sm-6 my-2">
+                                                            <div class="form-check form-switch">
+                                                                <input class="form-check-input" type="checkbox" name="no_job" role="switch" id="${fieldId('no_job')}" value="1">
+                                                                <label class="form-check-label" for="${fieldId('no_job')}">No Job</label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <label class="form-label" for="${fieldId('details')}">Other Details <span class="text-danger" data-details-required-indicator>*</span></label>
+                                                            <textarea name="details" id="${fieldId('details')}" class="form-control" rows="4" placeholder="Type here ..." required></textarea>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </form>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-dark" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="button" class="btn btn-outline-secondary d-none" id="${backBtnId}">Back</button>
+                                    <button type="button" class="btn btn-success" id="${saveBtnId}">Next</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `);
+            }
+
+            const $modal = $(`#${modalId}`);
+            const $form = $(`#${formId}`);
+            const $pageOne = $form.find('[data-send-cv-page="1"]');
+            const $pageTwo = $form.find('[data-send-cv-page="2"]');
+            const $saveButton = $(`#${saveBtnId}`);
+            const $backButton = $(`#${backBtnId}`);
+            const $hangup = $form.find('[name="hangup_call"]');
+            const $noJob = $form.find('[name="no_job"]');
+            const $details = $form.find('[name="details"]');
+            let currentPage = 1;
+            const updateNurseFields = function() {
+                const category = $form.find('[name="category"]:checked').val();
+                const isNonNurse = category === 'Non Nurse';
+                const isNursery = category === 'Nursery';
+                const hideNurseFields = category !== 'Nurse';
+                $pageTwo.find('[data-send-cv-question] .form-label').each(function() {
+                    const $label = $(this);
+                    if ($label.data('original-label') === undefined) {
+                        $label.data('original-label', $label.text());
+                    }
+                    $label.text($label.data('original-label'));
+                });
+                $form.find('[data-nurse-label]').each(function() {
+                    const $label = $(this);
+                    $label.text(isNursery
+                        ? $label.data('nursery-label')
+                        : isNonNurse
+                            ? $label.data('non-nurse-label')
+                            : $label.data('nurse-label'));
+                });
+                $pageTwo.find('[data-nurse-only]').each(function() {
+                    const $fields = $(this).find(':input');
+                    $(this).toggleClass('d-none', hideNurseFields);
+                    $fields.prop('disabled', hideNurseFields);
+                    if (hideNurseFields) {
+                        $fields.filter(':checkbox').prop('checked', false);
+                        $fields.filter('textarea').val('');
+                    }
+                });
+                let questionNumber = 5;
+                $pageTwo.find('[data-send-cv-question]').each(function() {
+                    const $question = $(this);
+                    if ($question.hasClass('d-none')) {
+                        return;
+                    }
+                    const $label = $question.find('.form-label').first();
+                    $label.text($label.text().replace(/^\d+\.\s*/, `${questionNumber++}. `));
+                });
+            };
+            const isShortcut = function() {
+                return $hangup.is(':checked') || $noJob.is(':checked');
+            };
+            const showPageOne = function() {
+                currentPage = 1;
+                $pageOne.removeClass('d-none');
+                $pageTwo.addClass('d-none');
+                $backButton.addClass('d-none');
+                $saveButton.text(isShortcut() ? 'Submit' : 'Next');
+            };
+            const showPageTwo = function() {
+                currentPage = 2;
+                $pageOne.addClass('d-none');
+                $pageTwo.removeClass('d-none');
+                $backButton.removeClass('d-none');
+                $saveButton.text('Submit');
+            };
+            const updateShortcut = function() {
+                const shortcut = isShortcut();
+                $details.prop('required', !shortcut);
+                $form.find('[data-details-required-indicator]').toggleClass('d-none', shortcut);
+                if (shortcut) {
+                    showPageOne();
+                    $pageTwo.find('.is-invalid, .invalid-feedback').remove();
+                } else if (currentPage === 2) {
+                    $saveButton.text('Submit');
+                } else {
+                    $saveButton.text('Next');
+                }
+            };
+
+            $modal.off('show.bs.modal.sendCv').on('show.bs.modal.sendCv', function() {
+                $form[0].reset();
+                $form.find('.is-invalid, .is-valid').removeClass('is-invalid is-valid');
+                $form.find('.invalid-feedback').remove();
+                showPageOne();
+                updateNurseFields();
+                updateShortcut();
+            });
+            $backButton.off('click').on('click', showPageOne);
+            $form.off('change', '[name="category"]').on('change', '[name="category"]', function() {
+                updateNurseFields();
+                $form.find('[data-category-error]').addClass('d-none');
+            });
+            $form.off('change', '[name="hangup_call"], [name="no_job"]').on(
+                'change',
+                '[name="hangup_call"], [name="no_job"]',
+                function() {
+                    if (this.checked) {
+                        $form.find('[name="hangup_call"], [name="no_job"]').not(this).prop('checked', false);
+                    }
+                    updateShortcut();
+                }
+            );
+            $(document).off('click', `#${saveBtnId}`).on('click', `#${saveBtnId}`, function() {
+                const shortcut = isShortcut();
+                if (!shortcut && currentPage === 1) {
+                    showPageTwo();
+                    return;
+                }
+
+                $form.find('.is-invalid').removeClass('is-invalid');
+                $form.find('.invalid-feedback').remove();
+                let valid = true;
+                if (!shortcut && !$form.find('[name="category"]:checked').length) {
+                    $form.find('[data-category-error]').removeClass('d-none');
+                    valid = false;
+                }
+                if (!shortcut && !$details.val()) {
+                    $details.addClass('is-invalid').after('<div class="invalid-feedback">Please enter note details.</div>');
+                    valid = false;
+                }
+                if (!shortcut) {
+                    ['interview_option_1', 'interview_option_2'].forEach(function(name) {
+                        const $field = $form.find(`[name="${name}"]`);
+                        if (!$field.val()) {
+                            $field.addClass('is-invalid').after(
+                                `<div class="invalid-feedback">Please select ${name === 'interview_option_1' ? 'Interview Availability Same Week.' : 'Interview Availability Next Week.'}</div>`
+                            );
+                            valid = false;
+                        }
+                    });
+                    if ($form.find('[name="transport_type[]"]:checked').length === 0) {
+                        $form.find('[name="transport_type[]"]').first().closest('.col-12').append(
+                            '<div class="invalid-feedback d-block">Please select at least one transport type.</div>'
+                        );
+                        valid = false;
+                    }
+                    const $visaStatus = $form.find('[name="visa_status"]');
+                    if (!$visaStatus.val().trim()) {
+                        $visaStatus.addClass('is-invalid').after('<div class="invalid-feedback">Please enter visa status.</div>');
+                        valid = false;
+                    }
+                }
+                if (!valid) {
+                    return;
+                }
+
+                const $button = $(this);
+                const originalText = $button.html();
+                $button.prop('disabled', true).html(
+                    '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Sending...'
+                );
+                $.ajax({
+                    url: shortcut ? '{{ route('saveSendCvHangupNote') }}' : '{{ route('sendCVtoQuality') }}',
+                    type: 'POST',
+                    data: $form.serialize(),
+                    success: function(response) {
+                        if (response.success) {
+                            toastr.success(response.message || 'CV sent successfully!');
+                            if (response.download_url) {
+                                const downloadLink = document.createElement('a');
+                                downloadLink.href = response.download_url;
+                                downloadLink.download = '';
+                                document.body.appendChild(downloadLink);
+                                downloadLink.click();
+                                downloadLink.remove();
+                            }
+                            $modal.modal('hide');
+                            $('#sales_table').DataTable().ajax.reload();
+                        } else {
+                            toastr.error(response.message || 'Failed to send CV');
+                        }
+                    },
+                    error: function(xhr) {
+                        const message = xhr.responseJSON && xhr.responseJSON.message ?
+                            xhr.responseJSON.message : 'An error occurred while submitting the form.';
+                        toastr.error(message);
+                    },
+                    complete: function() {
+                        $button.prop('disabled', false).html(originalText);
+                    }
+                });
+            });
+            $modal.modal('show');
         }
 
         // Function to mark no nursing home modal

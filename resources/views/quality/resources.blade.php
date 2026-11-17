@@ -98,6 +98,20 @@
                                         <a class="dropdown-item type-filter" href="#">Regular</a>
                                     </div>
                                 </div>
+                                <!-- Transport Type Filter Dropdown (Cleared CVs only) -->
+                                <div class="dropdown" id="transportFilterDropdown" style="display:none;">
+                                    <button class="btn btn-outline-primary me-1 my-1 dropdown-toggle" type="button"
+                                        id="dropdownMenuButtonTransport" data-bs-toggle="dropdown" aria-expanded="false">
+                                        <i class="ri-filter-line me-1"></i> <span id="showFilterTransport">All Transport</span>
+                                    </button>
+                                    <div class="dropdown-menu" aria-labelledby="dropdownMenuButtonTransport">
+                                        <a class="dropdown-item transport-filter" href="#" data-transport="">All Transport</a>
+                                        <a class="dropdown-item transport-filter" href="#" data-transport="Car">Car</a>
+                                        <a class="dropdown-item transport-filter" href="#" data-transport="Public Transport">Public Transport</a>
+                                        <a class="dropdown-item transport-filter" href="#" data-transport="By Walk">By Walk</a>
+                                        <a class="dropdown-item transport-filter" href="#" data-transport="Cycle">Cycle</a>
+                                    </div>
+                                </div>
                                 <!-- Title Filter Dropdown -->
                                 <div class="dropdown d-inline">
                                     <button class="btn btn-outline-primary me-1 my-1 dropdown-toggle" type="button"
@@ -228,6 +242,9 @@
                                     <th>PostCode (Sale)</th>
                                     <th>Source (Sale)</th>
                                     <th width="10%">Notes</th>
+                                    @if ($canShowSynopsisForms)
+                                        <th>Synopsis Form</th>
+                                    @endif
                                     <th>Action</th>
                                 </tr>
                             </thead>
@@ -307,6 +324,18 @@
             var currentCategoryFilters = [];
             var currentTitleFilters = [];
             var currentSourceFilters = [];
+            var currentTransportFilter = '';
+
+            // Transport filter only applies to the Cleared CVs tab
+            function toggleTransportFilter() {
+                const isCleared = currentFilter === 'cleared cvs';
+                $('#transportFilterDropdown').css('display', isCleared ? 'inline' : 'none');
+                if (!isCleared) {
+                    currentTransportFilter = '';
+                    $('#showFilterTransport').text('All Transport');
+                }
+            }
+            toggleTransportFilter();
 
             // Create loader row
             const loadingRow = `<tr><td colspan="100%" class="text-center py-4">
@@ -391,6 +420,12 @@
                     title: 'Notes',
                     default: true
                 },
+                @if ($canShowSynopsisForms)
+                    {
+                        title: 'Synopsis Form',
+                        default: true
+                    },
+                @endif
                 {
                     title: 'Action',
                     toggleable: false
@@ -486,6 +521,7 @@
                                 ); // Send the current filter value as a parameter
                         d.source_filter =
                             currentSourceFilters; // Send the current filter value as a parameter
+                        d.transport_filter = currentTransportFilter;
 
                         // Clean up search parameter
                         if (d.search && d.search.value) {
@@ -589,6 +625,14 @@
                         orderable: false,
                         searchable: false
                     },
+                    @if ($canShowSynopsisForms)
+                        {
+                            data: 'draft_file',
+                            name: 'draft_file',
+                            orderable: false,
+                            searchable: false
+                        },
+                    @endif
                     {
                         data: 'action',
                         name: 'action',
@@ -828,6 +872,15 @@
             $('.status-filter').on('click', function() {
                 currentFilter = ($(this).attr('data-status') || $(this).text()).toString().toLowerCase();
                 $('#showFilterStatus').html($(this).text());
+                toggleTransportFilter();
+                table.ajax.reload();
+            });
+
+            // Transport type filter dropdown handler
+            $('.transport-filter').on('click', function(e) {
+                e.preventDefault();
+                currentTransportFilter = $(this).data('transport') || '';
+                $('#showFilterTransport').text($(this).text());
                 table.ajax.reload();
             });
 

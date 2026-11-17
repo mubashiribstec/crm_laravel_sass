@@ -1,4 +1,4 @@
-@extends('layouts.vertical', ['title' => 'Email Temaplates List', 'subTitle' => 'Administrator'])
+@extends('layouts.vertical', ['title' => 'Email Templates', 'subTitle' => 'Administrator'])
 @section('style')
 <style>
     .dropdown-toggle::after {
@@ -10,7 +10,7 @@
 </style>
 @endsection
 @section('content')
-    <div class="row">
+        <div class="row">
         <div class="col-lg-12">
             <div class="card">
                 <div class="card-header border-0">
@@ -149,6 +149,7 @@
                     ['fontsize', ['fontsize']],
                     ['color', []],
                     ['para', ['ul', 'ol', 'paragraph']],
+                    ['table', ['table']],
                     ['insert', ['link']],
                     ['view', []]
                 ]
@@ -417,6 +418,7 @@
                             ['fontsize', ['fontsize']],
                             ['color', []],
                             ['para', ['ul', 'ol', 'paragraph']],
+                            ['table', ['table']],
                             ['insert', ['link']],
                             ['view', []]
                         ]

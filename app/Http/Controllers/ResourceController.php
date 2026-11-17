@@ -24,6 +24,7 @@ use Horsefly\ModuleNote;
 use App\Exports\EmailExport;
 
 use App\Support\DialLink;
+use App\Support\SaleEmailRestriction;
 
 use Carbon\Carbon;
 use Maatwebsite\Excel\Facades\Excel;
@@ -751,9 +752,11 @@ class ResourceController extends Controller
 
                     $url = route('emails.sendemailstoapplicants', ['sale_id' => $sale->id]);
 
-                    if ($is_disable) {
+                    $is_restricted = SaleEmailRestriction::applies($sale);
+
+                    if ($is_disable || $is_restricted) {
                         // Disabled button (not a link)
-                        $action = '<button class="btn btn-sm btn-success" disabled title="Coordinates missing" style="width:150px">
+                        $action = '<button class="btn btn-sm btn-success" disabled title="' . ($is_restricted ? SaleEmailRestriction::TITLE : 'Coordinates missing') . '" style="width:150px">
                                     <iconify-icon icon="mdi:email-send-outline" class="align-middle"></iconify-icon> Send Email
                                 </button>';
                     } else {

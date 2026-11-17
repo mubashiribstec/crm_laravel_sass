@@ -15,7 +15,7 @@
 
         [
             'status_filter', 'type_filter', 'category_filter', 'source_filter', 'title_filter',
-            'office_filter', 'user_filter', 'cv_limit_filter', 'date_range_filter', 'date_flock_filter'
+            'office_filter', 'user_filter', 'cv_limit_filter', 'blacklist_filter', 'date_range_filter', 'date_flock_filter'
         ].forEach(function(key) {
             const value = params[key];
             url.searchParams.delete(key);

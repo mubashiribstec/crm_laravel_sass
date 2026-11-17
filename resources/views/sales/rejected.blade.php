@@ -14,19 +14,8 @@
         <div class="col-lg-12">
             <div class="card">
                 <div class="card-header border-0">
-                    <div class="row justify-content-between">
-                        <div class="col-lg-3">
-                            <div class="text-md-start mt-3 pt-1">
-                                <div class="input-group">
-                                    <div class="position-relative flex-grow-1" style="display: flex;">
-                                        <input type="text" id="customSearchInput" class="form-control w-100" placeholder="Search ...">
-                                        <button class="d-none" id="customClearBtn" type="button" title="Clear"><i class="ri-close-line"></i></button>
-                                    </div>
-                                    <button class="btn btn-primary" id="customSearchBtn" type="button"><i class="ri-search-line"></i> Search</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-9">
+                    <div class="row justify-content-end">
+                        <div class="col-lg-12">
                             <div class="text-md-end mt-3">
                                 <!-- Date Range filter -->
                                 <div class="dropdown d-inline">
@@ -212,6 +201,11 @@
                                         <a class="dropdown-item cv-limit-filter" href="#">Max</a>
                                     </div>
                                 </div>
+                                <!-- Blacklisted only checkbox -->
+                                <label class="btn btn-outline-primary me-1 my-1 mb-1" for="blacklistedOnlyFilter">
+                                    <input class="form-check-input mt-0 me-1" type="checkbox" id="blacklistedOnlyFilter" autocomplete="off">
+                                    Blacklisted only
+                                </label>
                                 <!-- Button Dropdown -->
                                 <div class="dropdown d-inline">
                                     <button class="btn btn-outline-primary me-1 my-1 dropdown-toggle" type="button" id="dropdownMenuButton3" data-bs-toggle="dropdown" aria-expanded="false">
@@ -225,6 +219,19 @@
                             </div>
                         </div><!-- end col-->
                     </div>
+                    <div class="row justify-content-start">
+                        <div class="col-lg-3">
+                            <div class="text-md-start mt-3 pt-1">
+                                <div class="input-group">
+                                    <div class="position-relative flex-grow-1" style="display: flex;">
+                                        <input type="text" id="customSearchInput" class="form-control w-100" placeholder="Search ...">
+                                        <button class="d-none" id="customClearBtn" type="button" title="Clear"><i class="ri-close-line"></i></button>
+                                    </div>
+                                    <button class="btn btn-primary" id="customSearchBtn" type="button"><i class="ri-search-line"></i> Search</button>
+                                </div>
+                            </div>
+                        </div>
+                        </div>
                 </div>
             </div>
         </div>
@@ -234,6 +241,20 @@
         <div class="col-xl-12">
             <div class="card">
                 <div class="card-body p-3">
+                    <div id="columnsToolbar" class="dropdown d-inline">
+                        <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button"
+                            id="dropdownMenuColumns" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="ri-layout-column-line me-1"></i> Columns
+                        </button>
+                        <div class="dropdown-menu filter-dropdowns p-2" aria-labelledby="dropdownMenuColumns"
+                            style="min-width: 230px;">
+                            <div class="d-flex justify-content-between align-items-center px-1 mb-2">
+                                <a href="#" id="columnsSelectAll" class="text-primary small fw-semibold">Show All</a>
+                                <a href="#" id="columnsResetDefault" class="text-secondary small fw-semibold">Reset Default</a>
+                            </div>
+                            <div id="columnsList" style="max-height: 280px; overflow-y: auto;"></div>
+                        </div>
+                    </div>
                     <div class="table-responsive">
                         <table id="sales_table" class="table align-middle mb-3">
                             <thead class="bg-light-subtle">
@@ -341,6 +362,76 @@
                 $('#sales_table tbody').empty().append(loadingRow);
             }
 
+            const columnConfig = [
+                { title: '#', toggleable: false },
+                { title: 'Created Date', default: true },
+                { title: 'Rejected Date', default: false },
+                { title: 'Agent', default: true },
+                { title: 'Head Office', default: true },
+                { title: 'Unit Name', default: false },
+                { title: 'PostCode', default: true },
+                { title: 'Position Type', default: false },
+                { title: 'Title', default: true },
+                { title: 'Category', default: true },
+                { title: 'Experience', default: false },
+                { title: 'Qualification', default: false },
+                { title: 'Salary', default: false },
+                { title: 'CV Limit', default: true },
+                { title: 'Notes', default: true },
+                { title: 'Status', default: true },
+                { title: 'Action', toggleable: false }
+            ];
+            const columnVisibilityStorageKey = 'rejected_sales_table_column_visibility_v1';
+
+            function loadColumnVisibility() {
+                let stored = {};
+                try {
+                    stored = JSON.parse(localStorage.getItem(columnVisibilityStorageKey)) || {};
+                } catch (e) {
+                    stored = {};
+                }
+
+                return columnConfig.map(function(column, index) {
+                    if (column.toggleable === false) {
+                        return true;
+                    }
+                    return Object.prototype.hasOwnProperty.call(stored, index)
+                        ? !!stored[index]
+                        : !!column.default;
+                });
+            }
+
+            function saveColumnVisibility() {
+                const stored = {};
+                columnConfig.forEach(function(column, index) {
+                    if (column.toggleable !== false) {
+                        stored[index] = !!columnVisibility[index];
+                    }
+                });
+                localStorage.setItem(columnVisibilityStorageKey, JSON.stringify(stored));
+            }
+
+            function renderColumnsDropdown() {
+                const $list = $('#columnsList').empty();
+                columnConfig.forEach(function(column, index) {
+                    if (column.toggleable === false) {
+                        return;
+                    }
+
+                    const checked = columnVisibility[index] ? 'checked' : '';
+                    $list.append(`
+                        <div class="form-check">
+                            <input class="form-check-input column-toggle" type="checkbox"
+                                id="column_${index}" data-column-index="${index}" ${checked}>
+                            <label class="form-check-label" for="column_${index}">${column.title}</label>
+                        </div>
+                    `);
+                });
+            }
+
+            let columnVisibility = loadColumnVisibility();
+            renderColumnsDropdown();
+
             // Initialize DataTable with server-side processing
             var table = $('#sales_table').DataTable({
                 processing: false,  // Disable default processing state
@@ -357,6 +448,7 @@
                         d.title_filter = currentTitleFilters;  // Send the current filter value as a parameter
                         d.office_filter = currentOfficeFilters;  // Send the current filter value as a parameter
                         d.user_filter = currentUserFilters;  // Send the current filter value as a parameter
+                        d.blacklist_filter = $('#blacklistedOnlyFilter').is(':checked') ? 1 : 0;
                         d.cv_limit_filter = currentCVLimitFilter;  // Send the current filter value as a parameter
                     },
                     beforeSend: function() {
@@ -411,12 +503,22 @@
                         createdCell: function (td, cellData, rowData, row, col) {
                             $(td).css('text-align', 'center');  // Center the text in this column
                         }
+                    },
+                    {
+                        targets: columnVisibility
+                            .map(function(visible, index) { return visible ? null : index; })
+                            .filter(function(index) { return index !== null; }),
+                        visible: false
                     }
                 ],
                 rowId: function(data) {
                     return 'row_' + data.id; // Assign a unique ID to each row using the 'id' field from the data
                 },
-                dom: 'lrtip',  // Change the order to 'filter' (f), 'length' (l), 'table' (r), 'pagination' (p), and 'information' (i)
+                dom: '<"d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2"l>rtip',
+                initComplete: function() {
+                    const api = this.api();
+                    $(api.table().container()).find('.dataTables_length').after($('#columnsToolbar'));
+                },
                 drawCallback: function (settings) {
                     const api = this.api();
                     const pagination = $(api.table().container()).find('.dataTables_paginate');
@@ -493,6 +595,37 @@
                     pagination.html(paginationHtml);
                 },
             });
+
+            $(document).on('change', '.column-toggle', function() {
+                const index = Number($(this).data('column-index'));
+                columnVisibility[index] = $(this).is(':checked');
+                table.column(index).visible(columnVisibility[index]);
+                saveColumnVisibility();
+            });
+
+            $('#columnsSelectAll').on('click', function(e) {
+                e.preventDefault();
+                columnConfig.forEach(function(column, index) {
+                    if (column.toggleable !== false) {
+                        columnVisibility[index] = true;
+                        table.column(index).visible(true);
+                    }
+                });
+                saveColumnVisibility();
+                renderColumnsDropdown();
+            });
+
+            $('#columnsResetDefault').on('click', function(e) {
+                e.preventDefault();
+                columnConfig.forEach(function(column, index) {
+                    if (column.toggleable !== false) {
+                        columnVisibility[index] = !!column.default;
+                        table.column(index).visible(columnVisibility[index]);
+                    }
+                });
+                saveColumnVisibility();
+                renderColumnsDropdown();
+            });
             // Search logic helper
             function handleCustomSearch() {
                 let searchValue = $('#customSearchInput').val().trim();
@@ -538,6 +671,10 @@
 
                 $('#showFilterType').html(formattedText);
                 table.ajax.reload(); // Reload with updated type filter
+            });
+            // Blacklisted only checkbox
+            $('#blacklistedOnlyFilter').on('change', function() {
+                table.ajax.reload();
             });
             // cv limit filter dropdown handler
             $('.cv-limit-filter').on('click', function () {

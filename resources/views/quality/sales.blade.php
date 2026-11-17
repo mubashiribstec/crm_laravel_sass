@@ -209,6 +209,11 @@
                                         <a class="dropdown-item cv-limit-filter" href="#">Max</a>
                                     </div>
                                 </div>
+                                <!-- Blacklisted only checkbox -->
+                                <label class="btn btn-outline-primary me-1 my-1 mb-1" for="blacklistedOnlyFilter">
+                                    <input class="form-check-input mt-0 me-1" type="checkbox" id="blacklistedOnlyFilter" autocomplete="off">
+                                    Blacklisted only
+                                </label>
                             </div>
                         </div><!-- end col-->
                     </div>
@@ -270,12 +275,12 @@
                                     <th>PostCode</th>
                                     <th>Title</th>
                                     <th>Category</th>
-                                    <th>Source</th>
                                     <th>Details</th>
                                     <th>Experience</th>
                                     <th>Qualification</th>
                                     <th>Salary</th>
                                     <th>CV Limit</th>
+                                    <th>Source</th>
                                     <th width="15%">Notes</th>
                                     <th>Status</th>
                                     <th>Action</th>
@@ -411,10 +416,7 @@
                     title: 'Category',
                     default: true
                 },
-                {
-                    title: 'Source',
-                    default: true
-                },
+                
                 {
                     title: 'Details',
                     default: true
@@ -433,6 +435,10 @@
                 },
                 {
                     title: 'CV Limit',
+                    default: true
+                },
+                {
+                    title: 'Source',
                     default: true
                 },
                 {
@@ -540,6 +546,7 @@
                             currentOfficeFilters; // Send the current filter value as a parameter
                         d.source_filter =
                             currentSourceFilters; // Send the current filter value as a parameter
+                        d.blacklist_filter = $('#blacklistedOnlyFilter').is(':checked') ? 1 : 0;
                         d.cv_limit_filter =
                             currentFilterCvLimit; // Send the current filter value as a parameter
                     },
@@ -587,10 +594,7 @@
                         data: 'job_category',
                         name: 'job_categories.name'
                     },
-                    {
-                        data: 'job_source',
-                        name: 'job_sources.name'
-                    },
+                   
                     {
                         data: 'job_details',
                         name: 'job_details',
@@ -612,6 +616,10 @@
                         data: 'cv_limit',
                         name: 'sales.cv_limit'
                     },
+                     {
+                        data: 'job_source',
+                        name: 'job_sources.name'
+                    },
                     {
                         data: 'sale_notes',
                         name: 'sales.sale_notes',
@@ -629,19 +637,13 @@
                     }
                 ],
                 columnDefs: [{
-                        targets: 8, // Column index for 'job_details'
+                        targets: 13, // Column index for 'job_details'
                         createdCell: function(td, cellData, rowData, row, col) {
                             $(td).css('text-align', 'center'); // Center the text in this column
                         }
                     },
                     {
                         targets: 9, // Column index for 'job_details'
-                        createdCell: function(td, cellData, rowData, row, col) {
-                            $(td).css('text-align', 'center'); // Center the text in this column
-                        }
-                    },
-                    {
-                        targets: 15, // Column index for 'job_details'
                         createdCell: function(td, cellData, rowData, row, col) {
                             $(td).css('text-align', 'center'); // Center the text in this column
                         }
@@ -855,6 +857,10 @@
 
                 $('#showFilterType').html(formattedText);
                 table.ajax.reload(); // Reload with updated type filter
+            });
+            // Blacklisted only checkbox
+            $('#blacklistedOnlyFilter').on('change', function() {
+                table.ajax.reload();
             });
             // cv limit filter dropdown handler
             $('.cv-limit-filter').on('click', function() {

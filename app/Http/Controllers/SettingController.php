@@ -21,7 +21,10 @@ use Yajra\DataTables\Facades\DataTables;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 use App\Services\ScrapService;
+use App\Services\EmailLayoutRenderer;
 use Illuminate\Support\Facades\Gate;
 
 class SettingController extends Controller
@@ -39,6 +42,7 @@ class SettingController extends Controller
             'getSettings',
             'saveSmtpSettings',
             'saveGeneralSettings',
+            'saveEmailSignatureSettings',
             'saveGoogleSettings',
             'saveNotificationSettings',
             'saveSmsSettings',
@@ -61,7 +65,7 @@ class SettingController extends Controller
         $this->middleware('permission:administrator-job-source-edit')->only(['jobSourceUpdate']);
         $this->middleware('permission:administrator-email-template-index')->only(['emailTemplatesIndex', 'getEmailTemplates', 'emailEditTemplate']);
         $this->middleware('permission:administrator-email-template-create')->only(['emailTemplatesStore']);
-        $this->middleware('permission:administrator-email-template-edit')->only(['emailTemplatesUpdate']);
+        $this->middleware('permission:administrator-email-template-edit')->only(['emailTemplatesUpdate', 'saveEmailLayout']);
         $this->middleware('permission:administrator-sms-template-index')->only(['smsTemplatesIndex', 'getSmsTemplates', 'smsEditTemplate']);
         $this->middleware('permission:administrator-sms-template-create')->only(['smsTemplatesStore']);
         $this->middleware('permission:administrator-sms-template-edit')->only(['smsTemplatesUpdate']);
@@ -90,8 +94,34 @@ class SettingController extends Controller
     public function emailTemplatesIndex()
     {
         $users = DB::table('users')->where('is_active', true)->orderBy('name', 'asc')->get();
+        $emailLayoutHtml = app(EmailLayoutRenderer::class)->templateForEditing();
 
-        return view('settings.email-templates', compact('users'));
+        return view('settings.email-templates', compact('users', 'emailLayoutHtml'));
+    }
+
+    public function saveEmailLayout(Request $request)
+    {
+        $validated = $request->validate([
+            'email_layout_html' => 'required|string|max:60000',
+        ]);
+
+        if (
+            !str_contains($validated['email_layout_html'], '{{ email_content }}')
+            || !str_contains($validated['email_layout_html'], '<!-- EMAIL_SIGNATURE_START -->')
+            || !str_contains($validated['email_layout_html'], '<!-- EMAIL_SIGNATURE_END -->')
+        ) {
+            return response()->json([
+                'success' => false,
+                'errors' => ['email_layout_html' => ['Keep the {{ email_content }} placeholder and both email signature markers in the layout.']],
+            ], 422);
+        }
+
+        Setting::updateOrCreate(
+            ['key' => 'email_layout_html'],
+            ['value' => $validated['email_layout_html'], 'type' => 'html', 'group' => 'email']
+        );
+
+        return response()->json(['success' => true, 'message' => 'Email layout saved successfully.']);
     }
     public function smsTemplatesIndex()
     {
@@ -1309,19 +1339,26 @@ class SettingController extends Controller
     }
     public function saveGeneralSettings(Request $request)
     {
-        try {
-            $request->validate([
-                'site_name' => 'required|string|max:50',
-            ]);
+        $validated = $request->validate([
+            'site_name' => 'required|string|max:50',
+            'primary_email_address' => 'required|email|max:255',
+        ]);
 
-            Setting::updateOrCreate(
-                ['key' => 'site_name'], // condition (find by key)
-                ['value' => $request->site_name] // update or insert value
-            );
+        try {
+            DB::transaction(function () use ($validated) {
+                Setting::updateOrCreate(
+                    ['key' => 'site_name'],
+                    ['value' => $validated['site_name'], 'type' => 'string', 'group' => 'general']
+                );
+                Setting::updateOrCreate(
+                    ['key' => 'primary_email_address'],
+                    ['value' => $validated['primary_email_address'], 'type' => 'email', 'group' => 'email']
+                );
+            });
 
             return response()->json([
                 'success' => true,
-                'message' => 'Site Name saved successfully.'
+                'message' => 'General settings saved successfully.'
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -1330,6 +1367,82 @@ class SettingController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    public function saveEmailSignatureSettings(Request $request)
+    {
+        $validated = $request->validate([
+            'email_signature_email' => 'required|email|max:255',
+            'email_signature_company_name' => 'required|string|max:191',
+            'email_signature_phone' => 'required|string|max:50',
+            'email_signature_address' => 'required|string|max:500',
+            'email_signature_image' => 'nullable|image|mimes:jpg,jpeg,png,gif,webp|max:2048',
+        ]);
+
+        $imagePath = null;
+        if ($request->hasFile('email_signature_image')) {
+            $uploadDirectory = public_path('uploads/email-signatures');
+            File::ensureDirectoryExists($uploadDirectory);
+            $filename = 'signature-' . Str::uuid() . '.' . $request->file('email_signature_image')->extension();
+            $request->file('email_signature_image')->move($uploadDirectory, $filename);
+            $imagePath = 'uploads/email-signatures/' . $filename;
+        }
+
+        try {
+            DB::transaction(function () use ($validated, $imagePath) {
+                foreach (
+                    [
+                        'email_signature_email' => [
+                            $validated['email_signature_email'],
+                            'email',
+                        ],
+                        'email_signature_company_name' => [
+                            $validated['email_signature_company_name'],
+                            'string',
+                        ],
+                        'email_signature_phone' => [
+                            $validated['email_signature_phone'],
+                            'string',
+                        ],
+                        'email_signature_address' => [
+                            $validated['email_signature_address'],
+                            'string',
+                        ],
+                    ] as $key => [$value, $type]
+                ) {
+                    Setting::updateOrCreate(
+                        ['key' => $key],
+                        ['value' => $value, 'type' => $type, 'group' => 'signature']
+                    );
+                }
+
+                if ($imagePath !== null) {
+                    Setting::updateOrCreate(
+                        ['key' => 'email_signature_image'],
+                        ['value' => $imagePath, 'type' => 'string', 'group' => 'signature']
+                    );
+                }
+            });
+        } catch (\Throwable $e) {
+            if ($imagePath !== null) {
+                File::delete(public_path($imagePath));
+            }
+
+            Log::error('Failed to save email signature settings.', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Email signature settings could not be saved.',
+            ], 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Email signature settings saved successfully.',
+            'image_url' => $imagePath !== null ? asset($imagePath) : null,
+        ]);
     }
     public function saveVersion(Request $request)
     {

@@ -2,6 +2,8 @@
 
 namespace App\Traits;
 
+use App\Services\EmailLayoutRenderer;
+use App\Support\EmailInlineImages;
 use Horsefly\EmailTemplate;
 use Horsefly\SentEmail;
 use Illuminate\Support\Facades\Mail;
@@ -29,12 +31,13 @@ trait SendEmails
 
             $newPhrase = str_replace($prev_val, $replace, $template);
             $formattedMessage = nl2br($newPhrase);
+            $html = $this->renderEmailLayout($title, $subject, $formattedMessage);
 
-            Mail::send([], [], function ($message) use ($formattedMessage, $to, $from_email, $subject) {
+            Mail::send([], [], function ($message) use ($html, $to, $from_email, $subject) {
                 $message->from($from_email, 'Kingsbury Personnel Ltd');
                 $message->to($to);
                 $message->subject($subject);
-                $message->html($formattedMessage);
+                $message->html(EmailInlineImages::embed($message, $html));
             });
 
             $this->saveEmailDB($to, $from_email, $subject, $formattedMessage, $title, $applicant_id);
@@ -46,9 +49,14 @@ trait SendEmails
             throw new \Exception('Error sending email: ' . $e->getMessage());
         }
     }
-    public function saveEmailDB($email_to, $from_email, $emailSubject, $email_body, $email_title, $applicant_id = null, $sale_id = null)
+
+    protected function renderEmailLayout($title, $subject, $content, $showSignature = true)
     {
-        $user = Auth::user();
+        return app(EmailLayoutRenderer::class)->render($title, $subject, $content, $showSignature);
+    }
+
+    public function saveEmailDB($email_to, $from_email, $emailSubject, $email_body, $email_title, $applicant_id = null, $sale_id = null, $signatureIncluded = false, $useEmailLayout = true)
+    {
         try {
             $sent_email = new SentEmail();
             $sent_email->action_name   = strtolower(str_replace(' ', '_', $email_title));
@@ -57,10 +65,12 @@ trait SendEmails
             $sent_email->cc_emails     = '';
             $sent_email->subject       = $emailSubject;
             $sent_email->title         = $email_title;
-            $sent_email->template      = $email_body;
+            $sent_email->template      = $useEmailLayout
+                ? $this->renderEmailLayout($email_title, $emailSubject, $email_body, !$signatureIncluded)
+                : $email_body;
             $sent_email->applicant_id  = $applicant_id;
             $sent_email->sale_id       = $sale_id;
-            $sent_email->user_id       = $user->id; // safer than Auth::user()->id
+            $sent_email->user_id       = Auth::id();
             $sent_email->save();
 
             return true;
@@ -69,7 +79,7 @@ trait SendEmails
                 'to'      => $email_to,
                 'subject' => $emailSubject,
                 'title'   => $email_title,
-                'user_id' => $user->id
+                'user_id' => Auth::id(),
             ]);
             return false;
         }

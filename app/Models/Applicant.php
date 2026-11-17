@@ -361,6 +361,11 @@ class Applicant extends Model
     {
         return $this->hasMany(CVNote::class, 'applicant_id', 'id');
     }
+
+    public function synopsisForms()
+    {
+        return $this->hasMany(ApplicantsSynopsisForm::class, 'applicant_id', 'id');
+    }
     public function pivotSales()
     {
         return $this->hasMany(ApplicantPivotSale::class, 'applicant_id');

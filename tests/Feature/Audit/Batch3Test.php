@@ -38,13 +38,21 @@ class Batch3Test extends XplogentTestCase
     }
 
     // ── B-03 / B-04: send CV to quality ──────────────────────────────────────
+    /** The synopsis form's required answers (12 Nov: Send CV asks them before anything else). */
+    private function sendCvForm(int $applicantId, int $saleId, array $overrides = []): array
+    {
+        return array_merge(['applicant_id' => $applicantId, 'sale_id' => $saleId, 'details' => 'x',
+            'visa_status' => 'British citizen',
+            'interview_option_1' => now()->addDays(2)->format('Y-m-d\TH:i'),
+            'interview_option_2' => now()->addDays(8)->format('Y-m-d\TH:i')], $overrides);
+    }
+
     public function test_send_cv_to_quality_says_why_it_refuses_even_without_debug(): void
     {
         config(['app.debug' => false]);
         $staff = $this->staff('Jane Recruiter', 'applicant-view');
         $closed = $this->sale(['status' => 0]);
-        $this->actingAs($staff)->postJson('/sendCVtoQuality', ['applicant_id' => $this->applicant()->id,
-            'sale_id' => $closed->id, 'details' => 'x'])
+        $this->actingAs($staff)->postJson('/sendCVtoQuality', $this->sendCvForm($this->applicant()->id, $closed->id))
             ->assertStatus(422)->assertJsonPath('message', "CV can't be sent - the sale is not active.");
 
         // B-03: a sale whose job title is gone (the FK prevents it here; a DB without it doesn't)
@@ -52,8 +60,7 @@ class Batch3Test extends XplogentTestCase
         Schema::disableForeignKeyConstraints();
         JobTitle::whereKey($orphan->job_title_id)->delete();
         Schema::enableForeignKeyConstraints();
-        $this->actingAs($staff)->postJson('/sendCVtoQuality', ['applicant_id' => $this->applicant()->id,
-            'sale_id' => $orphan->id, 'details' => 'x'])
+        $this->actingAs($staff)->postJson('/sendCVtoQuality', $this->sendCvForm($this->applicant()->id, $orphan->id))
             ->assertStatus(422)->assertJsonPath('message', "CV can't be sent - the vacancy's job title no longer exists.");
     }
 
@@ -64,10 +71,29 @@ class Batch3Test extends XplogentTestCase
             'status' => 1, 'details' => 'x']);
         $a = $this->applicant();
         $this->actingAs($this->staff('Jane Recruiter', 'applicant-view'))->postJson('/sendCVtoQuality',
-            ['applicant_id' => $a->id, 'sale_id' => $sale->id, 'details' => 'no job now', 'no_job' => true])
+            $this->sendCvForm($a->id, $sale->id))
             ->assertOk()->assertJson(['success' => false]);
-        $this->assertFalse((bool) $a->fresh()->is_no_job);          // the "no job" write was undone (B-04)
+        $this->assertSame(1, CVNote::where('sale_id', $sale->id)->count());          // nothing new written
+        $this->assertSame(0, $a->synopsisForms()->count());                          // and no synopsis form
         $this->assertSame(0, \Illuminate\Support\Facades\DB::transactionLevel() - 1);   // nothing left open
+    }
+
+    public function test_hang_up_and_no_job_are_applicant_notes_not_cv_sends(): void
+    {
+        $staff = $this->staff('Jane Recruiter', 'applicant-view');
+        $a = $this->applicant();
+        $sale = $this->sale();
+        // Send CV refuses them (the form saves them through saveSendCvHangupNote instead)…
+        $this->actingAs($staff)->postJson('/sendCVtoQuality', $this->sendCvForm($a->id, $sale->id, ['no_job' => true]))
+            ->assertStatus(422)->assertJsonPath('message', 'Hang-up and No Job submissions must be saved as applicant notes.');
+        $this->assertFalse((bool) $a->fresh()->is_no_job);
+        $this->assertSame(0, CVNote::where('sale_id', $sale->id)->count());
+        // … which records "no job" as a note, and nothing goes to quality.
+        $this->actingAs($staff)->postJson('/saveSendCvHangupNote', ['applicant_id' => $a->id,
+            'details' => 'no job now', 'no_job' => true])->assertOk()->assertJson(['success' => true]);
+        $this->assertTrue((bool) $a->fresh()->is_no_job);
+        $this->assertSame(0, CVNote::where('sale_id', $sale->id)->count());
+        $this->assertSame(0, \Illuminate\Support\Facades\DB::transactionLevel() - 1);
     }
 
     // ── B-05 / L-05: creating a sale ─────────────────────────────────────────
