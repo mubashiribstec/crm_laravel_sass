@@ -44,8 +44,15 @@ svc() {  # svc reload|restart|enable NAME
     case $action in
       enable) service "$name" status >/dev/null 2>&1 || service "$name" start ;;
       reload) service "$name" reload 2>/dev/null || service "$name" restart ;;
-      *)      service "$name" "$action" ;;
+      *)      service "$name" "$action" || true ;;
     esac
+  fi
+  # A restart can leave the service stopped (init-script race without systemd): start it again.
+  if [ "$action" != enable ]; then
+    local _
+    for _ in 1 2 3 4 5; do svc_running "$name" && return 0; sleep 1; done
+    if [ -d /run/systemd/system ]; then systemctl start "$name"; else service "$name" start; fi
+    sleep 1; svc_running "$name" || die "$name is not running after $action (see its log)."
   fi
 }
 svc_running() { if [ -d /run/systemd/system ]; then systemctl is-active --quiet "$1"; else service "$1" status >/dev/null 2>&1; fi; }
