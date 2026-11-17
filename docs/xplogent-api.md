@@ -57,9 +57,15 @@ inside the office network.
 
 **Both on one server:**
 - **The CRM natively:** `XPLOGENT_BASE_URL=http://127.0.0.1:8765`.
-- **The CRM in `docker-compose.yml`:** `XPLOGENT_BASE_URL=http://host.docker.internal:8765`, because
-  `127.0.0.1` inside the container is the container itself. Xplogent must listen beyond
-  127.0.0.1 for this to work (`local --lan`).
+- **Both in Docker (the usual same-server setup):** a shared Docker network, no port opened.
+  1. On the server: `sudo xplogent-docker crm link` (creates the network `xplogent-crm`).
+  2. In this `.env`: `XPLOGENT_BASE_URL=http://xplogent:8765` and
+     `COMPOSE_FILE=docker-compose.yml:docker-compose.xplogent.yml`, then `docker compose up -d`
+     and `docker compose exec app php artisan config:clear`.
+  3. In Xplogent's dashboard: Calls → CRM → CRM address `http://crm`.
+
+  The database stays on the private `laravel` network. Don't use `127.0.0.1` from the container: it
+  is the container itself.
 
 **Check this direction:** `php artisan xplogent:check`, or **Test connection to Xplogent** on the
 Agent call page. Both send a signed test request that dials nothing, and say what to fix if it

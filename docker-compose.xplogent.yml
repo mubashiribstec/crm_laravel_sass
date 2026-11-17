@@ -1,0 +1,27 @@
+# Xplogent (the AI phone agent) in Docker on this same server: the CRM joins Xplogent's
+# shared network "xplogent-crm", so the two reach each other by container name and no
+# extra port is opened. The database stays on the private "laravel" network only.
+#   CRM → Xplogent:  XPLOGENT_BASE_URL=http://xplogent:8765 in .env
+#   Xplogent → CRM:  http://crm (this nginx), set in Xplogent's dashboard (Calls → CRM)
+#
+# On the Xplogent server first:  sudo xplogent-docker crm link   (creates the network)
+# Then add to this folder's .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.xplogent.yml
+# and run:  docker compose up -d && docker compose exec app php artisan config:clear
+# Check:    docker compose exec app php artisan xplogent:check
+services:
+  app:
+    networks:
+      - laravel
+      - xplogent
+
+  nginx:
+    networks:
+      laravel: {}
+      xplogent:
+        aliases: [crm]
+
+networks:
+  xplogent:
+    name: ${XPLOGENT_NETWORK:-xplogent-crm}
+    external: true
