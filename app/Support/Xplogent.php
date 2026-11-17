@@ -64,13 +64,21 @@ class Xplogent
      * - a number already in valid international E.164 (e.g. +92…, +1…) — the
      *   CRM is used for international recruitment, and Xplogent dials E.164
      *   numbers on its trunks; and
-     * - a short PBX extension (2-6 chars of digits, *, # or + — e.g. "505"),
-     *   which Xplogent dials on the PBX extension line (via sip/extension).
-     *   A short digit string is never a valid UK national number (those are
-     *   10-11 digits), so this cannot misclassify a UK number.
+     * - a short PBX extension (2-6 chars of digits, * or #, e.g. "505" or
+     *   "*43") that is one of your test extensions (xplogent.test_extensions:
+     *   XPLOGENT_TEST_EXTENSIONS / TEST_APPLICANT_EXTENSION), which Xplogent
+     *   dials on the PBX extension line. Any other short number in a record is
+     *   junk ("12345"), never a colleague's desk phone to ring.
+     *
+     * +44 numbers still go through the UK rules (so "+44 07…" is fixed, not
+     * passed on), and emergency numbers (999, 112, 911, 000) are never
+     * dialable: Xplogent refuses them too, this keeps them out of the queue.
      *
      * Anything else (or too short) -> null.
      */
+    /** Never handed to the AI to dial, on any line (Xplogent refuses them as well). */
+    public const EMERGENCY_NUMBERS = ['999', '112', '911', '000'];
+
     public static function toE164(?string $number): ?string
     {
         $clean = preg_replace('/[\s\-\(\)]/', '', trim((string) $number));
@@ -78,30 +86,46 @@ class Xplogent
             return null;
         }
 
-        // Already valid international E.164 (e.g. +92…, +1…, +44…) — pass through.
-        if (preg_match('/^\+[1-9]\d{6,14}$/', $clean)) {
+        if (in_array($clean, self::EMERGENCY_NUMBERS, true)) {
+            return null;
+        }
+
+        // Already valid international E.164 outside the UK (e.g. +92…, +1…): pass through.
+        // +44 numbers fall through to the UK rules below.
+        if (preg_match('/^\+[1-9]\d{6,14}$/', $clean) && !str_starts_with($clean, '+44')) {
             return $clean;
         }
 
-        // Short PBX extension (e.g. "505") — pass through for the extension line.
-        if (preg_match('/^[0-9*#+]{2,6}$/', $clean)) {
-            return $clean;
+        // Short PBX extension (e.g. "505", "*43"): only your listed test extensions.
+        if (preg_match('/^[0-9*#]{2,6}$/', $clean)) {
+            return in_array($clean, self::testExtensions(), true) ? $clean : null;
         }
 
         $digits = PhoneNumber::digits($number);
         if ($digits === '') {
             return null;
         }
+        // +44 / 0044 / 44 back to the national form; "+44 07…" (the 0 left in) as well.
         if (str_starts_with($digits, '0044')) {
-            $digits = '0' . substr($digits, 4);
+            $digits = '0' . ltrim(substr($digits, 4), '0');
         } elseif (str_starts_with($digits, '44') && strlen($digits) >= 12) {
-            $digits = '0' . substr($digits, 2);
+            $digits = '0' . ltrim(substr($digits, 2), '0');
         }
         if (preg_match('/^0([1237]\d{8,9})$/', $digits, $m)) {
             return '+44' . $m[1];
         }
 
         return null;
+    }
+
+    /** @return string[] the short extensions the AI may ring (config xplogent.test_extensions) */
+    public static function testExtensions(): array
+    {
+        try {
+            return array_map('strval', (array) config('xplogent.test_extensions', []));
+        } catch (\Throwable) {
+            return [];                      // no app (plain unit test): none
+        }
     }
 
     /** E.164 (or anything) back to the national form the CRM stores: +447… -> 07… */
