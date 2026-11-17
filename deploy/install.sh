@@ -181,11 +181,14 @@ ensure_storage_link
 step "Database schema"
 clear_compiled
 artisan migrate --force
-USERS="$(cd "$APP_DIR" && runuser -u "$WEB_USER" -- php artisan tinker --execute='echo \DB::table("users")->count();' 2>/dev/null | tail -1)"
+USERS="$(artisan tinker --execute='echo \DB::table("users")->count();' 2>/dev/null | tail -1)"
+[[ "$USERS" =~ ^[0-9]+$ ]] || die "Couldn't count the users table after migrating (see $LOG_FILE)."
 ADMIN_PASS=""
 if [ "$USERS" = 0 ] && [ "${CRM_SEED:-yes}" != no ]; then
   ADMIN_PASS="$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)"
-  (cd "$APP_DIR" && runuser -u "$WEB_USER" -- env SEED_ADMIN_PASSWORD="$ADMIN_PASS" php artisan db:seed --force >/dev/null)
+  chown "$WEB_USER" "$ARTISAN_HOME"
+  (cd "$APP_DIR" && runuser -u "$WEB_USER" -- env HOME="$ARTISAN_HOME" XDG_CONFIG_HOME="$ARTISAN_HOME" \
+      SEED_ADMIN_PASSWORD="$ADMIN_PASS" php artisan db:seed --force >/dev/null)
   ok "new database seeded (roles, permissions, settings, admin user)"
 else
   artisan db:seed --class='Database\Seeders\AllowedIpsSeeder' --force >/dev/null

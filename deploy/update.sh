@@ -92,7 +92,7 @@ if [ "$PENDING" -gt 0 ]; then
     DUMP="$(command -v mariadb-dump || command -v mysqldump)"
     DB_NAME="$(env_get DB_DATABASE)"
     mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR"
-    CNF="$(mktemp)"; chmod 600 "$CNF"; trap 'rm -f "$CNF"' EXIT
+    CNF="$(mktemp)"; chmod 600 "$CNF"; trap 'rm -f "$CNF"; rm -rf "$ARTISAN_HOME"' EXIT
     printf '[client]\nuser=%s\npassword="%s"\nhost=%s\nport=%s\n' "$(env_get DB_USERNAME)" \
       "$(env_get DB_PASSWORD | sed 's/\\/\\\\/g; s/"/\\"/g')" "$(env_get DB_HOST)" "$(env_get DB_PORT)" > "$CNF"
     SIZE_MB="$(mariadb --defaults-extra-file="$CNF" -N -e "SELECT ROUND(SUM(data_length+index_length)/1048576) FROM information_schema.tables WHERE table_schema='${DB_NAME//\'/}'" 2>/dev/null || echo 0)"

@@ -69,7 +69,14 @@ as_owner() {
       npm_config_cache="$OWNER_HOME/.npm" PATH="$PATH" "$@"
   fi
 }
-artisan() { (cd "$APP_DIR" && runuser -u "$WEB_USER" -- php artisan "$@"); }
+# HOME/XDG point at a private temp folder: www-data's home (/var/www) isn't writable, and tinker
+# (psysh) refuses to run without a config folder it can write.
+ARTISAN_HOME="$(mktemp -d /tmp/crm-artisan.XXXXXX)"
+trap 'rm -rf "$ARTISAN_HOME"' EXIT
+artisan() {
+  chown "$WEB_USER" "$ARTISAN_HOME"
+  (cd "$APP_DIR" && runuser -u "$WEB_USER" -- env HOME="$ARTISAN_HOME" XDG_CONFIG_HOME="$ARTISAN_HOME" php artisan "$@")
+}
 # Before migrating: drop compiled config/routes/views/events only. optimize:clear would also empty
 # the cache store, which is a database table that doesn't exist yet on a new database.
 clear_compiled() { local c; for c in config:clear route:clear view:clear event:clear; do artisan "$c" >/dev/null; done; }

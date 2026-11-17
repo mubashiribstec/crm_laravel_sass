@@ -14,6 +14,8 @@ One command sets up a new server: Apache, PHP-FPM, MariaDB, the code, the databa
 curl -fsSL https://raw.githubusercontent.com/mubashiribstec/crm_laravel_sass/main/deploy/install.sh | sudo bash
 ```
 
+A minimal Debian may not have `curl`; install it first with `sudo apt-get install -y curl`.
+
 If you already have a clone, run `sudo bash deploy/install.sh` from inside it instead.
 
 The installer asks only for the following:
