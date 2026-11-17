@@ -64,16 +64,27 @@ class SyncPermissionsTest extends XplogentTestCase
     public function test_allowed_ip_prefixes_come_from_env_and_are_only_added(): void
     {
         DB::table('allowed_ips')->insert(['ip_prefix' => '10.9.8']);
-        putenv('CRM_ALLOWED_IP_PREFIXES=172.16.4, 10.0.5.* ,bad,1.2.3.4,127.0.0');
+        // env() reads $_ENV / $_SERVER (filled from .env) before getenv(): set all three.
+        $key = 'CRM_ALLOWED_IP_PREFIXES';
+        $saved = [$_ENV[$key] ?? null, $_SERVER[$key] ?? null, getenv($key)];
+        $set = function (?string $v) use ($key) {
+            if ($v === null) { unset($_ENV[$key], $_SERVER[$key]); putenv($key); }
+            else { $_ENV[$key] = $_SERVER[$key] = $v; putenv("{$key}={$v}"); }
+        };
+        $set('172.16.4, 10.0.5.* ,bad,1.2.3.4,127.0.0');
         try {
             $this->assertSame(['172.16.4', '10.0.5', '127.0.0'], AllowedIpsSeeder::prefixes());
             $this->seed(AllowedIpsSeeder::class);
             $this->seed(AllowedIpsSeeder::class);                                // twice: no duplicates
         } finally {
-            putenv('CRM_ALLOWED_IP_PREFIXES');
+            $set(null);
         }
         $this->assertEqualsCanonicalizing(['10.9.8', '172.16.4', '10.0.5', '127.0.0'],
             DB::table('allowed_ips')->pluck('ip_prefix')->all());
         $this->assertSame(['192.168.110', '127.0.0'], AllowedIpsSeeder::prefixes()); // the default
+        [$e, $sv, $g] = $saved;                                                    // as .env had it
+        if ($e !== null) { $_ENV[$key] = $e; }
+        if ($sv !== null) { $_SERVER[$key] = $sv; }
+        if ($g !== false) { putenv("{$key}={$g}"); }
     }
 }
