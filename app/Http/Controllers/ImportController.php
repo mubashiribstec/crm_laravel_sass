@@ -8080,7 +8080,7 @@ class ImportController extends Controller
 
         if ($extension == 'pdf') {
             // try {
-            return Pdf::getText(Storage::path($path), 'C:\poppler\bin\pdftotext.exe'); // Adjust path if needed
+            return Pdf::getText(Storage::path($path), config('services.pdftotext.path')); // PDFTOTEXT_PATH, else on PATH
             // } catch (\Exception $e) {
             //     Log::channel('import')->error('PDF text extraction failed: ' . $e->getMessage());
             //     return null;
