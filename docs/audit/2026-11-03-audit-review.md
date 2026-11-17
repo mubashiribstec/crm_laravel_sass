@@ -207,6 +207,12 @@ X-01. Tested on MariaDB and MySQL 8, both locally and in CI.
 - **X-08:** the recipient isn't required to be a stored address (the candidate may have just given
   a new one); it is recorded on the email and in the call's note instead.
 
+### 17 Nov: after merging Atif's 18 commits (12 Nov)
+| Item | What |
+|---|---|
+| CI red since 12 Nov | Send CV now requires the synopsis form (visa status, two interview dates) and moves hang-up / No job to `saveSendCvHangupNote`; the job type is capitalised in vacancy emails ("Full Time"). Tests updated to the new behaviour; a new test covers hang-up / No job through the notes endpoint. With PR #3, the whole suite passes on MariaDB and MySQL 8 (147). |
+| N-16 (P1, privacy) | The new synopsis forms (name, visa status, DBS convictions, salary) were written to `public/uploads/synopsisForms/`, which the web server serves without a login. Now in `storage/app/private/synopsis-forms/` under random names, served only by the download routes; `synopsis:move-to-private` moves existing ones; nginx and `.htaccess` refuse the old folders. |
+
 **Still open:**
 - X-17 (owner question 2);
 - X-06 and X-11 (features, P2);

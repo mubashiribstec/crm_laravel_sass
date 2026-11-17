@@ -26,7 +26,7 @@ class XplogentJobDetailsTest extends XplogentTestCase
         $this->assertSame('0', (string) $sent->status);                                  // queued for emails:send-bulk
         $this->assertSame('jobs@example.org', $sent->sent_from);
         $this->assertSame($this->ai->id, $sent->user_id);
-        $this->assertStringContainsString('Xplogent AI here. Care at Oak House, £12.60 per hour, Full time, Days.', $sent->template);
+        $this->assertStringContainsString('Xplogent AI here. Care at Oak House, £12.60 per hour, Full Time, Days.', $sent->template);
         $this->signed('/api/xplogent/send-job-details', ['call_id' => 10] + $body)->assertOk();     // other calls
         $this->signed('/api/xplogent/send-job-details', ['call_id' => 11] + $body)->assertOk();
         $this->signed('/api/xplogent/send-job-details', ['call_id' => 12] + $body)->assertStatus(429);

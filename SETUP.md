@@ -242,18 +242,21 @@ fall back to a `REGEXP_REPLACE` scan, so the feature works either way.
   `applicant_email_secondary`; the message lists their ids. Keep the right one in
   `applicant_email_secondary`, clear the other, and run `migrate` again (nothing is dropped
   until then).
-- **Private files.** CVs and office/unit attachments are stored under `storage/app/private/` and
+- **Private files.** CVs, office/unit attachments and Send CV synopsis forms are stored under `storage/app/private/` and
   downloaded only through permission-checked routes. Files uploaded before this change are still
   in `public/uploads/`; move them once (dry run first, the commands list what they would do):
   ```bash
   php artisan cv:move-to-private --dry-run && php artisan cv:move-to-private
   php artisan documents:move-to-private --dry-run && php artisan documents:move-to-private
+  php artisan synopsis:move-to-private --dry-run && php artisan synopsis:move-to-private
   ```
   Then make sure the web server refuses the old folders. The bundled `docker/nginx.conf` and
   `public/.htaccess` (Apache) already do; with your own nginx config add:
   ```nginx
   location ^~ /uploads/resume/ { return 404; }
   location ^~ /uploads/docs/   { return 404; }
+  location ^~ /uploads/synopsisForms/ { return 404; }
+  location ^~ /uploads/drafts/ { return 404; }
   location ^~ /uploads/ { location ~* \.(php|phtml|phar|pl|py|cgi|sh|html?|svg)$ { deny all; } }
   ```
 
