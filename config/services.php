@@ -52,4 +52,9 @@ return [
         'token' => env('SMS_WEBHOOK_TOKEN', ''),
     ],
 
+    // pdftotext (poppler-utils) for PDF CV import. Empty = found on PATH (Debian: /usr/bin/pdftotext).
+    'pdftotext' => [
+        'path' => env('PDFTOTEXT_PATH') ?: null,
+    ],
+
 ];

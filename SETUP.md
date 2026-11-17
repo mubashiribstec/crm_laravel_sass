@@ -1,12 +1,15 @@
 # CRM Portal — Setup Guide
 
-A Laravel 11 recruitment CRM with a built-in **xplosip** softphone integration
+A Laravel 12 recruitment CRM with a built-in **xplosip** softphone integration
 (click-to-dial, caller-ID lookup, call logging, and dial-collision locks).
 
 This guide covers two ways to run the project:
 
 - **[A. Docker (recommended)](#a-docker-setup-recommended)** — one command, everything self-contained.
 - **[B. Manual / local PHP](#b-manual-local-setup)** — for development against a local PHP + MariaDB.
+
+**Installing on a Debian server without Docker (Apache + PHP-FPM + MariaDB)?** Use the one-command
+installer: [INSTALL.md](INSTALL.md). Updates: [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
@@ -132,12 +135,14 @@ docker compose down                               # stop (keeps the mariadb_data
 
 ## B. Manual / local setup
 
+For development on your own machine. For a server, use [INSTALL.md](INSTALL.md) instead.
+
 ```bash
-git clone https://github.com/mubashiribstec/CRM.git
-cd CRM
+git clone https://github.com/mubashiribstec/crm_laravel_sass.git
+cd crm_laravel_sass
 
 composer install
-npm install
+npm ci
 
 cp .env.example .env
 php artisan key:generate

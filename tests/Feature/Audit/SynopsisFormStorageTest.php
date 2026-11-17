@@ -119,4 +119,22 @@ class SynopsisFormStorageTest extends XplogentTestCase
         $this->assertStringContainsString('RewriteRule ^uploads/synopsisForms/ - [R=404,L]', $htaccess);
         $this->assertStringContainsString('RewriteRule ^uploads/drafts/ - [R=404,L]', $htaccess);
     }
+
+    public function test_a_row_whose_file_is_missing_is_left_alone_and_downloads_404(): void
+    {
+        $a = $this->applicant();
+        $sale = $this->sale();
+        $gone = 'uploads/synopsisForms/2026/11/10/no-such-file_000001.docx';
+        $form = $a->synopsisForms()->create(['sale_id' => $sale->id, 'file_url' => $gone]);
+
+        $this->artisan('synopsis:move-to-private', ['--dry-run' => true])
+            ->expectsOutputToContain('point at a file that does not exist')->assertSuccessful();
+        $this->artisan('synopsis:move-to-private')
+            ->expectsOutputToContain("#{$form->id}")->assertSuccessful();
+        $this->assertSame($gone, $form->fresh()->file_url);                       // row unchanged
+        $this->assertFileDoesNotExist(public_path($gone));                         // nothing invented
+
+        $this->actingAs($this->staff('Quality Lead', 'applicant-show-synopsis-forms'))
+            ->get(route('applicants.draft-file.download', $form->id))->assertNotFound();
+    }
 }

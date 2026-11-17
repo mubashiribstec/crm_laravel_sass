@@ -77,4 +77,16 @@ export default defineConfig({
             refresh: true,
         }),
     ],
+    css: {
+        preprocessorOptions: {
+            scss: {
+                // The SCSS imports "./node_modules/…" from resources/scss; Vite 6's modern Sass API
+                // resolves those against the project root only when it is a load path.
+                loadPaths: [import.meta.dirname ?? process.cwd()],
+                // Bootstrap 5's own @import / colour functions: Sass 1.8x+ deprecation noise.
+                quietDeps: true,
+                silenceDeprecations: ["import", "global-builtin", "color-functions"],
+            },
+        },
+    },
 });

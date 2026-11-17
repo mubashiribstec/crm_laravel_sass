@@ -7,9 +7,10 @@ use Spatie\Permission\Models\Permission;
 
 class PermissionsTableSeeder extends Seeder
 {
-    public function run()
+    /** Every permission the app checks. Also used by `php artisan crm:sync-permissions`. */
+    public static function names(): array
     {
-        $permissions = [
+        return [
             // Dashboard Permissions
             'dashboard',
             'dashboard-top-stats',
@@ -484,8 +485,11 @@ class PermissionsTableSeeder extends Seeder
             'xplogent-view-transcript',
 
         ];
+    }
 
-        foreach ($permissions as $permission) {
+    public function run()
+    {
+        foreach (self::names() as $permission) {
             Permission::firstOrCreate(
                 ['name' => $permission, 'guard_name' => 'web']
             );
