@@ -207,6 +207,12 @@ X-01. Tested on MariaDB and MySQL 8, both locally and in CI.
 - **X-08:** the recipient isn't required to be a stored address (the candidate may have just given
   a new one); it is recorded on the email and in the call's note instead.
 
+### 17 Nov: after merging Atif's 18 commits (12 Nov)
+| Item | What |
+|---|---|
+| CI red since 12 Nov | Send CV now requires the synopsis form (visa status, two interview dates) and moves hang-up / No job to `saveSendCvHangupNote`; the job type is capitalised in vacancy emails ("Full Time"). Tests updated to the new behaviour; a new test covers hang-up / No job through the notes endpoint. With PR #3, the whole suite passes on MariaDB and MySQL 8 (147). |
+| N-16 (P1, privacy) | The new synopsis forms (name, visa status, DBS convictions, salary) were written to `public/uploads/synopsisForms/`, which the web server serves without a login. Now in `storage/app/private/synopsis-forms/` under random names, served only by the download routes; `synopsis:move-to-private` moves existing ones; nginx and `.htaccess` refuse the old folders. |
+
 **Still open:**
 - X-17 (owner question 2);
 - X-06 and X-11 (features, P2);
@@ -331,6 +337,15 @@ Checked:
   - a CV download;
 - nginx (`docker/nginx.conf`): `/uploads/docs/…` and `/uploads/resume/…` answer 404, other static
   files are served.
+
+### 8 Nov: Muse's handover
+| Item | Where | What |
+|---|---|---|
+| PR #2 review (`toE164`) | this repo, PR #3 | Muse's change made `main`'s CI red: any 2–6 character number became a dialable PBX extension (a junk phone like `12345` would ring a colleague). Now only your test extensions (`XPLOGENT_TEST_EXTENSIONS`, `TEST_APPLICANT_EXTENSION`) pass; 999/112/911/000 never; `+44` goes through the UK rules (and `+44 07…` is fixed); other E.164 still passes. |
+| MA-01 | this repo, PR #4 | Atif's `applicantSearchOptimized` cherry-picked unchanged, with tests (indexed postcode, FULLTEXT names). |
+| X-11 (a dial is never recorded) | Xplogent `339265d` | Busy / unanswered calls asked for by the CRM are logged and sent as a call summary (the CRM writes the call log, ends the lock). Our own line failing is not sent. |
+| X-06 (voicemail) | Xplogent `ea50e28` | A short voicemail message after the beep, settable (`voip.voicemail.message`, `callback_number`); the summary says "voicemail message left". The audio stays on the PBX / Xplogent. |
+| X-10 (lock before the POST) | by design | Xplogent takes the CRM dial lock itself before it dials a CRM-requested call; a CRM-side lock first would make that lock fail with 409. The page's exclusion check plus Xplogent's lock close the race. |
 
 **Still open:**
 - N-09, N-14, N-15;
