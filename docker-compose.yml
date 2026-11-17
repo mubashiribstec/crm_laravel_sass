@@ -23,8 +23,9 @@ services:
     networks:
       - laravel
     # Xplogent on another machine needs nothing here: set XPLOGENT_BASE_URL to its LAN
-    # address in .env. Xplogent on this same server: XPLOGENT_BASE_URL=http://host.docker.internal:8765
-    # (127.0.0.1 inside this container is the container itself).
+    # address in .env. Xplogent in Docker on this same server: use docker-compose.xplogent.yml
+    # (a shared network; XPLOGENT_BASE_URL=http://xplogent:8765). 127.0.0.1 inside this
+    # container is the container itself, never Xplogent.
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
